@@ -221,6 +221,19 @@
 
               <div class="comment-content markdown-body" v-html="renderMarkdown(comment.content)"></div>
 
+              <!-- 评论图片 -->
+              <div v-if="comment.images?.length" class="comment-images">
+                <div
+                  v-for="(img, imgIndex) in comment.images"
+                  :key="imgIndex"
+                  class="image-thumbnail"
+                  @click="viewImage(img)"
+                  @contextmenu.prevent="showImageContextMenu($event, img)"
+                >
+                  <img :src="img" alt="评论图片" />
+                </div>
+              </div>
+
               <div class="comment-actions-bar">
                 <el-button text size="small" @click="likeComment(comment)">
                   <el-icon><CircleCheck /></el-icon>
@@ -255,8 +268,67 @@
                     </el-avatar>
                     <span class="reply-user">{{ reply.userName }}</span>
                     <span class="reply-time">{{ formatRelativeTime(reply.createdAt) }}</span>
+                    <!-- 回复操作按钮 -->
+                    <div class="reply-actions">
+                      <el-button text size="small" @click="editReply(comment, reply)">
+                        <el-icon><Edit /></el-icon>
+                      </el-button>
+                      <el-button text size="small" @click="deleteReply(comment, reply)">
+                        <el-icon><Delete /></el-icon>
+                      </el-button>
+                    </div>
                   </div>
-                  <div class="reply-content" v-html="renderMarkdown(reply.content)"></div>
+                  <!-- 回复编辑模式 -->
+                  <div v-if="editingReply?.replyId === reply.id" class="reply-edit-area">
+                    <!-- 回复编辑图片预览 -->
+                    <div v-if="editingReply.images?.length" class="reply-edit-images">
+                      <div
+                        v-for="(img, imgIndex) in editingReply.images"
+                        :key="imgIndex"
+                        class="image-preview-item"
+                      >
+                        <img :src="img" alt="预览图片" />
+                        <el-button
+                          class="remove-image-btn"
+                          text
+                          size="small"
+                          @click="removeReplyEditImage(imgIndex)"
+                        >
+                          <el-icon><Close /></el-icon>
+                        </el-button>
+                      </div>
+                    </div>
+                    <el-input
+                      v-model="editingReply.content"
+                      type="textarea"
+                      :rows="2"
+                      :placeholder="'编辑回复...（支持拖拽或粘贴图片）'"
+                      @drop="handleReplyEditImageDrop"
+                      @dragover.prevent
+                      @paste="handleReplyEditImagePaste"
+                    />
+                    <div class="reply-edit-actions">
+                      <span class="image-hint">支持拖拽或粘贴图片</span>
+                      <div class="action-btns">
+                        <el-button size="small" @click="cancelEditReply">取消</el-button>
+                        <el-button type="primary" size="small" @click="saveReplyEdit">保存</el-button>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- 回复内容 -->
+                  <div v-else class="reply-content" v-html="renderMarkdown(reply.content)"></div>
+                  <!-- 回复图片 -->
+                  <div v-if="reply.images?.length" class="reply-images">
+                    <div
+                      v-for="(img, imgIndex) in reply.images"
+                      :key="imgIndex"
+                      class="image-thumbnail"
+                      @click="viewImage(img)"
+                      @contextmenu.prevent="showImageContextMenu($event, img)"
+                    >
+                      <img :src="img" alt="回复图片" />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -271,7 +343,12 @@
         </div>
 
         <!-- 添加评论输入框 -->
-        <div class="comment-input-area">
+        <div
+          class="comment-input-area"
+          @drop="handleImageDrop"
+          @dragover.prevent
+          @paste="handleImagePaste"
+        >
           <div v-if="replyingTo" class="replying-to">
             <span>回复 {{ replyingTo.userName }}</span>
             <el-button text size="small" @click="cancelReply">
@@ -284,11 +361,29 @@
               <el-icon><Close /></el-icon>
             </el-button>
           </div>
+          <!-- 图片预览区域 -->
+          <div v-if="commentImages.length" class="comment-images-preview">
+            <div
+              v-for="(img, index) in commentImages"
+              :key="index"
+              class="image-preview-item"
+            >
+              <img :src="img" alt="预览图片" />
+              <el-button
+                class="remove-image-btn"
+                text
+                size="small"
+                @click="removeCommentImage(index)"
+              >
+                <el-icon><Close /></el-icon>
+              </el-button>
+            </div>
+          </div>
           <el-input
             v-model="newCommentContent"
             type="textarea"
             :rows="3"
-            :placeholder="replyingTo ? '回复评论...' : '添加评论...（支持Markdown格式）'"
+            :placeholder="replyingTo ? '回复评论...（支持拖拽或粘贴图片）' : '添加评论...（支持Markdown格式、拖拽或粘贴图片）'"
             @keydown="handleCommentKeydown"
           />
           <div class="input-actions">
@@ -296,6 +391,7 @@
               <el-button text @click="attachFile">
                 <el-icon><Paperclip /></el-icon>
               </el-button>
+              <span class="image-hint">支持拖拽或粘贴图片</span>
             </div>
             <el-button type="primary" size="small" @click="submitComment">
               发送
@@ -589,6 +685,9 @@ const newCommentContent = ref('')
 const replyingTo = ref(null)
 const editingCommentId = ref(null)
 const selectedTextForComment = ref('')
+const editingReply = ref(null)
+const commentImages = ref([])
+const replyImages = ref([])
 
 // ==================== 选区状态 ====================
 const selectedText = ref('')
@@ -1170,6 +1269,12 @@ const toggleCommentExpand = (commentId) => {
     expandedCommentIds.value.push(commentId)
   }
   activeCommentId.value = commentId
+
+  // 自动定位到左侧正文对应段落
+  const comment = comments.value.find(c => c.id === commentId)
+  if (comment && comment.paragraphIndex !== undefined) {
+    scrollToParagraph(comment.paragraphIndex)
+  }
 }
 
 const clearSelectedText = () => {
@@ -1177,7 +1282,7 @@ const clearSelectedText = () => {
 }
 
 const submitComment = () => {
-  if (!newCommentContent.value.trim()) return
+  if (!newCommentContent.value.trim() && commentImages.value.length === 0) return
 
   if (replyingTo.value) {
     const parentComment = comments.value.find(c => c.id === replyingTo.value.id)
@@ -1188,6 +1293,7 @@ const submitComment = () => {
         userName: '当前用户',
         userAvatar: '',
         content: newCommentContent.value,
+        images: [...commentImages.value],
         createdAt: new Date()
       })
     }
@@ -1196,6 +1302,9 @@ const submitComment = () => {
     const comment = comments.value.find(c => c.id === editingCommentId.value)
     if (comment) {
       comment.content = newCommentContent.value
+      if (commentImages.value.length > 0) {
+        comment.images = [...commentImages.value]
+      }
     }
     editingCommentId.value = null
   } else {
@@ -1203,11 +1312,15 @@ const submitComment = () => {
     const pendingComment = comments.value.find(c => c.id === activeCommentId.value && !c.content)
     if (pendingComment) {
       pendingComment.content = newCommentContent.value
+      if (commentImages.value.length > 0) {
+        pendingComment.images = [...commentImages.value]
+      }
     }
   }
 
   newCommentContent.value = ''
   selectedTextForComment.value = ''
+  commentImages.value = []
 }
 
 const replyToComment = (comment) => {
@@ -1246,9 +1359,254 @@ const handleCommentAction = (command, comment) => {
   }
 }
 
+// 编辑回复
+const editReply = (comment, reply) => {
+  editingReply.value = {
+    commentId: comment.id,
+    replyId: reply.id,
+    content: reply.content,
+    images: reply.images ? [...reply.images] : []
+  }
+}
+
+// 保存回复编辑
+const saveReplyEdit = () => {
+  if (!editingReply.value) return
+  const comment = comments.value.find(c => c.id === editingReply.value.commentId)
+  if (comment && comment.replies) {
+    const reply = comment.replies.find(r => r.id === editingReply.value.replyId)
+    if (reply) {
+      reply.content = editingReply.value.content
+      reply.images = editingReply.value.images?.length ? [...editingReply.value.images] : undefined
+      ElMessage.success('回复已更新')
+    }
+  }
+  editingReply.value = null
+}
+
+// 处理回复编辑时的图片拖拽
+const handleReplyEditImageDrop = (e) => {
+  e.preventDefault()
+  const files = e.dataTransfer.files
+  for (let i = 0; i < files.length; i++) {
+    if (files[i].type.indexOf('image') !== -1) {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        if (!editingReply.value.images) {
+          editingReply.value.images = []
+        }
+        editingReply.value.images.push(event.target.result)
+      }
+      reader.readAsDataURL(files[i])
+    }
+  }
+}
+
+// 处理回复编辑时的图片粘贴
+const handleReplyEditImagePaste = (e) => {
+  const items = e.clipboardData.items
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type.indexOf('image') !== -1) {
+      const file = items[i].getAsFile()
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        if (!editingReply.value.images) {
+          editingReply.value.images = []
+        }
+        editingReply.value.images.push(event.target.result)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+}
+
+// 移除回复编辑中的图片
+const removeReplyEditImage = (index) => {
+  if (editingReply.value && editingReply.value.images) {
+    editingReply.value.images.splice(index, 1)
+  }
+}
+
+// 取消回复编辑
+const cancelEditReply = () => {
+  editingReply.value = null
+}
+
+// 删除回复
+const deleteReply = (comment, reply) => {
+  ElMessageBox.confirm('确定要删除这条回复吗？', '删除回复', {
+    confirmButtonText: '删除',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(() => {
+    const replyIndex = comment.replies.findIndex(r => r.id === reply.id)
+    if (replyIndex > -1) {
+      comment.replies.splice(replyIndex, 1)
+      ElMessage.success('回复已删除')
+    }
+  }).catch(() => {})
+}
+
 const handleCommentKeydown = (e) => {
   if (e.key === 'Enter' && e.metaKey) {
     submitComment()
+  }
+}
+
+// ==================== 图片处理功能 ====================
+// 处理拖拽图片
+const handleImageDrop = (e) => {
+  e.preventDefault()
+  const files = e.dataTransfer.files
+  handleImageFiles(files)
+}
+
+// 处理粘贴图片
+const handleImagePaste = (e) => {
+  const items = e.clipboardData.items
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type.indexOf('image') !== -1) {
+      const file = items[i].getAsFile()
+      handleImageFile(file)
+    }
+  }
+}
+
+// 处理多个图片文件
+const handleImageFiles = (files) => {
+  for (let i = 0; i < files.length; i++) {
+    if (files[i].type.indexOf('image') !== -1) {
+      handleImageFile(files[i])
+    }
+  }
+}
+
+// 处理单个图片文件
+const handleImageFile = (file) => {
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    commentImages.value.push(e.target.result)
+  }
+  reader.readAsDataURL(file)
+}
+
+// 移除评论图片
+const removeCommentImage = (index) => {
+  commentImages.value.splice(index, 1)
+}
+
+// 查看图片全图
+const viewImage = (imgSrc) => {
+  // 创建全屏图片查看器
+  const viewer = document.createElement('div')
+  viewer.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    cursor: zoom-out;
+  `
+  const img = document.createElement('img')
+  img.src = imgSrc
+  img.style.cssText = `
+    max-width: 90%;
+    max-height: 90%;
+    object-fit: contain;
+  `
+  viewer.appendChild(img)
+  viewer.onclick = () => document.body.removeChild(viewer)
+  document.body.appendChild(viewer)
+}
+
+// 显示图片右键菜单
+const showImageContextMenu = (e, imgSrc) => {
+  // 创建右键菜单
+  const menu = document.createElement('div')
+  menu.style.cssText = `
+    position: fixed;
+    top: ${e.clientY}px;
+    left: ${e.clientX}px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 4px 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 9999;
+  `
+  menu.innerHTML = `
+    <div style="padding: 8px 16px; cursor: pointer; hover: background: #f5f5f5;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='white'">
+      复制图片
+    </div>
+    <div style="padding: 8px 16px; cursor: pointer;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='white'">
+      在新窗口打开
+    </div>
+  `
+
+  // 复制图片功能
+  menu.children[0].onclick = () => {
+    copyImageToClipboard(imgSrc)
+    document.body.removeChild(menu)
+  }
+
+  // 新窗口打开
+  menu.children[1].onclick = () => {
+    window.open(imgSrc, '_blank')
+    document.body.removeChild(menu)
+  }
+
+  document.body.appendChild(menu)
+
+  // 点击其他地方关闭菜单
+  const closeMenu = (event) => {
+    if (!menu.contains(event.target)) {
+      if (menu.parentNode) {
+        document.body.removeChild(menu)
+      }
+      document.removeEventListener('click', closeMenu)
+    }
+  }
+  setTimeout(() => {
+    document.addEventListener('click', closeMenu)
+  }, 0)
+}
+
+// 复制图片到剪贴板
+const copyImageToClipboard = async (imgSrc) => {
+  try {
+    const response = await fetch(imgSrc)
+    const blob = await response.blob()
+    await navigator.clipboard.write([
+      new ClipboardItem({ [blob.type]: blob })
+    ])
+    ElMessage.success('图片已复制到剪贴板')
+  } catch (err) {
+    // 降级方案：使用 canvas
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, 0, 0)
+      canvas.toBlob(async (blob) => {
+        try {
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+          ])
+          ElMessage.success('图片已复制到剪贴板')
+        } catch (e) {
+          ElMessage.error('复制失败，请手动保存图片')
+        }
+      })
+    }
+    img.src = imgSrc
   }
 }
 
@@ -1781,6 +2139,34 @@ const attachFile = () => { ElMessage.info('附件功能') }
       margin-bottom: $spacing-sm;
     }
 
+    .comment-images,
+    .reply-images {
+      display: flex;
+      flex-wrap: wrap;
+      gap: $spacing-xs;
+      margin-bottom: $spacing-sm;
+
+      .image-thumbnail {
+        width: 80px;
+        height: 80px;
+        border-radius: $radius-sm;
+        overflow: hidden;
+        cursor: pointer;
+        border: 1px solid $border-light;
+
+        img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          transition: transform 0.2s;
+        }
+
+        &:hover img {
+          transform: scale(1.05);
+        }
+      }
+    }
+
     .comment-actions-bar {
       display: flex;
       align-items: center;
@@ -1815,11 +2201,94 @@ const attachFile = () => { ElMessage.info('附件功能') }
             font-size: 0.75rem;
             color: $text-secondary;
           }
+
+          .reply-actions {
+            margin-left: auto;
+            opacity: 0;
+            transition: opacity 0.2s;
+
+            .el-button {
+              padding: 2px 4px;
+            }
+          }
+
+          &:hover .reply-actions {
+            opacity: 1;
+          }
+        }
+
+        .reply-edit-area {
+          padding-left: 28px;
+          margin-bottom: $spacing-sm;
+
+          .reply-edit-images {
+            display: flex;
+            flex-wrap: wrap;
+            gap: $spacing-xs;
+            margin-bottom: $spacing-xs;
+
+            .image-preview-item {
+              position: relative;
+              width: 60px;
+              height: 60px;
+              border-radius: $radius-sm;
+              overflow: hidden;
+              border: 1px solid $border-light;
+
+              img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+              }
+
+              .remove-image-btn {
+                position: absolute;
+                top: 2px;
+                right: 2px;
+                padding: 2px;
+                background: rgba(0, 0, 0, 0.5);
+                color: white;
+                border-radius: 50%;
+                opacity: 0;
+                transition: opacity 0.2s;
+
+                &:hover {
+                  background: rgba(0, 0, 0, 0.7);
+                }
+              }
+
+              &:hover .remove-image-btn {
+                opacity: 1;
+              }
+            }
+          }
+
+          .reply-edit-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: $spacing-xs;
+            margin-top: $spacing-xs;
+
+            .image-hint {
+              font-size: 0.75rem;
+              color: $text-tertiary;
+            }
+
+            .action-btns {
+              display: flex;
+              gap: $spacing-xs;
+            }
+          }
         }
 
         .reply-content {
           font-size: 0.875rem;
           color: $text-secondary;
+          padding-left: 28px;
+        }
+
+        .reply-images {
           padding-left: 28px;
         }
       }
@@ -1851,6 +2320,48 @@ const attachFile = () => { ElMessage.info('附件功能') }
       }
     }
 
+    .comment-images-preview {
+      display: flex;
+      flex-wrap: wrap;
+      gap: $spacing-xs;
+      margin-bottom: $spacing-sm;
+
+      .image-preview-item {
+        position: relative;
+        width: 60px;
+        height: 60px;
+        border-radius: $radius-sm;
+        overflow: hidden;
+        border: 1px solid $border-light;
+
+        img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        .remove-image-btn {
+          position: absolute;
+          top: 2px;
+          right: 2px;
+          padding: 2px;
+          background: rgba(0, 0, 0, 0.5);
+          color: white;
+          border-radius: 50%;
+          opacity: 0;
+          transition: opacity 0.2s;
+
+          &:hover {
+            background: rgba(0, 0, 0, 0.7);
+          }
+        }
+
+        &:hover .remove-image-btn {
+          opacity: 1;
+        }
+      }
+    }
+
     .input-actions {
       display: flex;
       justify-content: space-between;
@@ -1859,7 +2370,13 @@ const attachFile = () => { ElMessage.info('附件功能') }
 
       .input-left {
         display: flex;
+        align-items: center;
         gap: $spacing-xs;
+
+        .image-hint {
+          font-size: 0.75rem;
+          color: $text-tertiary;
+        }
       }
     }
   }
