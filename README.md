@@ -1,4 +1,4 @@
-# EnofLaw - 普通法学习平台
+# WeLaw - 普通法学习平台
 
 <p align="center">
   <img src="https://img.shields.io/badge/Vue-3.x-4FC08D?style=flat-square&logo=vue.js" alt="Vue3">
