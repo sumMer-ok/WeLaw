@@ -320,7 +320,7 @@ export const useAIStore = defineStore('ai', () => {
   const messages = ref([
     {
       role: 'assistant',
-      content: '您好！我是EnofLaw AI助手。我可以帮您分析案例、解释法律概念或回答关于您案例库的问题。请问有什么可以帮您？',
+      content: '您好！我是Henry。我可以帮您分析案例、解释法律概念或回答关于您案例库的问题。请问有什么可以帮您？',
       timestamp: new Date().toISOString()
     }
   ])
@@ -381,7 +381,7 @@ export const useAIStore = defineStore('ai', () => {
     messages.value = [
       {
         role: 'assistant',
-        content: '您好！我是EnofLaw AI助手。我可以帮您分析案例、解释法律概念或回答关于您案例库的问题。请问有什么可以帮您？',
+        content: '您好！我是Henry。我可以帮您分析案例、解释法律概念或回答关于您案例库的问题。请问有什么可以帮您？',
         timestamp: new Date().toISOString()
       }
     ]

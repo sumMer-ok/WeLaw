@@ -3,7 +3,7 @@
     <div class="sidebar-header">
       <div class="logo">
         <el-icon class="logo-icon"><ScaleToOriginal /></el-icon>
-        <span class="logo-text" v-show="!mainStore.sidebarCollapsed">EnofLaw</span>
+        <span class="logo-text" v-show="!mainStore.sidebarCollapsed">WeLaw</span>
       </div>
       <button class="collapse-btn" @click="mainStore.toggleSidebar">
         <el-icon><Fold v-if="!mainStore.sidebarCollapsed" /><Expand v-else /></el-icon>
@@ -33,9 +33,9 @@
           <span class="nav-text">学习集</span>
           <span class="nav-badge">2</span>
         </router-link>
-        <router-link to="/mindmap" class="nav-item" :class="{ 'active': $route.path.startsWith('/mindmap') }">
-          <el-icon class="nav-icon"><Share /></el-icon>
-          <span class="nav-text">思维导图</span>
+        <router-link to="/flashcards" class="nav-item" :class="{ 'active': $route.path === '/flashcards' }">
+          <el-icon class="nav-icon"><Memo /></el-icon>
+          <span class="nav-text">闪卡复习</span>
         </router-link>
       </div>
 
@@ -73,11 +73,10 @@ import router from '@/router'
 const mainStore = useMainStore()
 const currentRoute = useRoute()
 
-const mainRoutes = computed(() => 
-  router.getRoutes().filter(route => 
-    ['Dashboard', 'CaseLibrary', 'Vocabulary', 'Flashcards'].includes(route.name)
-  )
-)
+const mainRoutes = computed(() => {
+  const order = ['Dashboard', 'CaseLibrary', 'Vocabulary', 'Notes', 'FileLibrary', 'MindMap']
+  return order.map(name => router.getRoutes().find(route => route.name === name)).filter(Boolean)
+})
 </script>
 
 <style lang="scss" scoped>

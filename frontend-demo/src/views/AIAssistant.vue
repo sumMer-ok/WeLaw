@@ -8,7 +8,7 @@
             <el-icon><MagicStick /></el-icon>
           </div>
           <div class="header-text">
-            <h1>AI 助手</h1>
+            <h1>Henry</h1>
             <p>基于您的案例库提供智能回答</p>
           </div>
         </div>

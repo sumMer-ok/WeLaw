@@ -31,7 +31,7 @@ export async function sendChatMessage(messages, options = {}) {
         messages: [
           {
             role: 'system',
-            content: '你是EnofLaw AI助手，一个专业的法律学习助手。你帮助用户分析法律案例、解释法律术语、比较相关案例。请用中文回答，回答要专业、准确、易懂。'
+            content: '你是Henry，一个专业的法律学习助手。你帮助用户分析法律案例、解释法律术语、比较相关案例。请用中文回答，回答要专业、准确、易懂。'
           },
           ...messages
         ],
@@ -79,7 +79,7 @@ export async function sendChatMessageStream(messages, onChunk, options = {}) {
         messages: [
           {
             role: 'system',
-            content: '你是EnofLaw AI助手，一个专业的法律学习助手。你帮助用户分析法律案例、解释法律术语、比较相关案例。请用中文回答，回答要专业、准确、易懂。'
+            content: '你是Henry，一个专业的法律学习助手。你帮助用户分析法律案例、解释法律术语、比较相关案例。请用中文回答，回答要专业、准确、易懂。'
           },
           ...messages
         ],

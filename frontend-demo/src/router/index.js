@@ -7,6 +7,8 @@ import Flashcards from '@/views/Flashcards.vue'
 import StudySets from '@/views/StudySets.vue'
 import MindMap from '@/views/MindMap.vue'
 import AIAssistant from '@/views/AIAssistant.vue'
+import Notes from '@/views/Notes.vue'
+import FileLibrary from '@/views/FileLibrary.vue'
 
 const routes = [
   {
@@ -31,7 +33,13 @@ const routes = [
     path: '/vocabulary',
     name: 'Vocabulary',
     component: Vocabulary,
-    meta: { title: '词汇学习', icon: 'Collection' }
+    meta: { title: '单词库', icon: 'Collection' }
+  },
+  {
+    path: '/notes',
+    name: 'Notes',
+    component: Notes,
+    meta: { title: '笔记库', icon: 'Notebook' }
   },
   {
     path: '/flashcards',
@@ -44,6 +52,12 @@ const routes = [
     name: 'StudySets',
     component: StudySets,
     meta: { title: '学习集', icon: 'FolderOpened' }
+  },
+  {
+    path: '/files',
+    name: 'FileLibrary',
+    component: FileLibrary,
+    meta: { title: '文件库', icon: 'Folder' }
   },
   {
     path: '/mindmap/:id?',

@@ -3,7 +3,7 @@
     <!-- 顶部导航栏 -->
     <div class="top-header">
       <div class="header-left">
-        <h1 class="page-title">EnofLaw案例库</h1>
+        <h1 class="page-title">WeLaw案例库</h1>
       </div>
       <div class="header-right">
         <el-button type="text" @click="showGlobalSearch = true">
