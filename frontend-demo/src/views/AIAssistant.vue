@@ -43,7 +43,7 @@
         </div>
 
         <!-- Loading Indicator -->
-        <div v-if="isLoading" class="message assistant loading">
+        <div v-if="aiStore.isLoading" class="message assistant loading">
           <div class="message-avatar">
             <el-icon><MagicStick /></el-icon>
           </div>
@@ -86,9 +86,9 @@
             <el-button text>
               <el-icon><Paperclip /></el-icon>
             </el-button>
-            <el-button 
-              type="primary" 
-              :disabled="!inputMessage.trim() || isLoading"
+            <el-button
+              type="primary"
+              :disabled="!inputMessage.trim() || aiStore.isLoading"
               @click="sendMessage"
             >
               <el-icon><Promotion /></el-icon>
@@ -156,14 +156,13 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, watch } from 'vue'
 import { useAIStore } from '@/stores'
 
 const aiStore = useAIStore()
 
 const messagesRef = ref(null)
 const inputMessage = ref('')
-const isLoading = ref(false)
 
 const relatedWords = ['precedent', 'jurisdiction', 'negligence', 'consideration', 'breach']
 
@@ -175,33 +174,35 @@ const formatMessage = (content) => {
 }
 
 const formatTime = (timestamp) => {
-  return new Date(timestamp).toLocaleTimeString('zh-CN', { 
-    hour: '2-digit', 
-    minute: '2-digit' 
+  return new Date(timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit'
   })
 }
 
-const sendMessage = () => {
+const sendMessage = async () => {
   const message = inputMessage.value.trim()
-  if (!message || isLoading.value) return
+  if (!message || aiStore.isLoading) return
 
-  aiStore.sendMessage(message)
   inputMessage.value = ''
-  isLoading.value = true
+  await aiStore.sendMessage(message)
 
   // Scroll to bottom
   nextTick(() => {
-    messagesRef.value.scrollTop = messagesRef.value.scrollHeight
-  })
-
-  // Simulate loading
-  setTimeout(() => {
-    isLoading.value = false
-    nextTick(() => {
+    if (messagesRef.value) {
       messagesRef.value.scrollTop = messagesRef.value.scrollHeight
-    })
-  }, 1500)
+    }
+  })
 }
+
+// 监听消息变化，自动滚动到底部
+watch(() => aiStore.messages.length, () => {
+  nextTick(() => {
+    if (messagesRef.value) {
+      messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+    }
+  })
+})
 
 const sendQuickAction = (action) => {
   inputMessage.value = action
@@ -209,7 +210,7 @@ const sendQuickAction = (action) => {
 }
 
 const clearChat = () => {
-  aiStore.messages.splice(1)
+  aiStore.clearMessages()
 }
 </script>
 

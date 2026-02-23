@@ -13,6 +13,11 @@
         <p class="case-citation">{{ currentCase?.citation }}</p>
       </div>
       <div class="header-actions">
+        <el-tooltip content="编辑正文" placement="bottom">
+          <el-button text @click="toggleEditMode" :type="isEditing ? 'primary' : ''">
+            <el-icon><Edit /></el-icon>
+          </el-button>
+        </el-tooltip>
         <el-tooltip content="分享" placement="bottom">
           <el-button text @click="showShareDialog = true">
             <el-icon><Share /></el-icon>
@@ -65,14 +70,44 @@
           </el-button>
         </div>
         <div v-if="!tocCollapsed" class="toc-content">
+          <div v-if="tocItems.length === 0" class="empty-toc">
+            暂无目录，请在正文中选择文本添加
+          </div>
           <div
-            v-for="(item, index) in tableOfContents"
-            :key="index"
-            class="toc-item"
-            :class="{ active: currentSection === item.id }"
-            @click="scrollToSection(item.id)"
+            v-for="(item, index) in tocItems"
+            :key="item.id"
+            class="toc-item-wrapper"
           >
-            {{ item.title }}
+            <div
+              v-if="editingTocIndex !== index"
+              class="toc-item"
+              :class="{ active: currentSection === item.id }"
+              :style="{ paddingLeft: (item.level * 12) + 'px' }"
+              @click="scrollToParagraph(item.paragraphIndex)"
+            >
+              <span class="toc-text">{{ item.title }}</span>
+              <div class="toc-actions">
+                <el-icon @click.stop="startEditToc(index)" title="重命名"><Edit /></el-icon>
+                <el-icon @click.stop="updateTocLevel(index, -1)" title="升级"><ArrowLeft /></el-icon>
+                <el-icon @click.stop="updateTocLevel(index, 1)" title="降级"><ArrowRight /></el-icon>
+                <el-icon @click.stop="removeTocItem(index)" title="删除"><Close /></el-icon>
+              </div>
+            </div>
+            <!-- 重命名输入框 -->
+            <div
+              v-else
+              class="toc-item toc-editing"
+              :style="{ paddingLeft: (item.level * 12) + 'px' }"
+            >
+              <el-input
+                v-model="editingTocTitle"
+                size="small"
+                @keyup.enter="saveTocEdit"
+                @keyup.esc="cancelTocEdit"
+                @blur="saveTocEdit"
+                ref="tocEditInput"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -81,20 +116,56 @@
       <div class="content-area" :class="{ 'with-comments': showCommentsPanel }">
         <div class="document-content" ref="documentRef">
           <div class="case-text" :style="{ fontSize: fontSize + 'px' }">
-            <div
-              v-for="(paragraph, index) in caseParagraphs"
-              :key="index"
-              class="paragraph"
-              :data-paragraph-index="index"
-            >
-              <span v-if="showParagraphNumbers" class="paragraph-number">{{ index + 1 }}</span>
-              <span
-                class="paragraph-text"
-                @mouseup="handleTextSelection"
-                @mousedown="handleMouseDown"
-                v-html="renderParagraphWithAnnotations(paragraph, index)"
-              ></span>
-            </div>
+            <!-- 编辑模式 - 使用 editableParagraphs -->
+            <template v-if="isEditing">
+              <div
+                v-for="(paragraph, index) in editableParagraphs"
+                :key="'edit-' + index"
+                class="paragraph"
+                :data-paragraph-index="index"
+              >
+                <div class="paragraph-editor">
+                  <div class="editor-row">
+                    <span class="paragraph-number-edit">{{ index + 1 }}</span>
+                    <el-input
+                      v-model="editableParagraphs[index]"
+                      type="textarea"
+                      :rows="1"
+                      autosize
+                      @keydown.enter.prevent="handleParagraphEnter(index, $event)"
+                      @keydown.delete="handleParagraphDelete(index, $event)"
+                      :ref="(el) => setParagraphInputRef(el, index)"
+                    />
+                    <el-button
+                      text
+                      size="small"
+                      class="delete-paragraph-btn"
+                      @click="removeParagraph(index)"
+                      title="删除段落"
+                    >
+                      <el-icon><Delete /></el-icon>
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <!-- 阅读模式 - 使用 displayParagraphs -->
+            <template v-else>
+              <div
+                v-for="(paragraph, index) in displayParagraphs"
+                :key="'read-' + index"
+                class="paragraph"
+                :data-paragraph-index="index"
+              >
+                <span v-if="showParagraphNumbers" class="paragraph-number">{{ index + 1 }}</span>
+                <span
+                  class="paragraph-text"
+                  @mouseup="handleTextSelection"
+                  @mousedown="handleMouseDown"
+                  v-html="renderParagraphWithAnnotations(paragraph, index)"
+                ></span>
+              </div>
+            </template>
           </div>
         </div>
       </div>
@@ -131,7 +202,8 @@
                 <span class="text-content">{{ comment.selectedText }}</span>
               </div>
               <div class="expand-icon">
-                <el-icon><ArrowDown v-if="!expandedCommentIds.includes(comment.id)" /><ArrowUp v-else /></el-icon>
+                <el-icon v-if="!expandedCommentIds.includes(comment.id)"><ArrowDown /></el-icon>
+                <el-icon v-else><ArrowUp /></el-icon>
               </div>
             </div>
 
@@ -308,6 +380,13 @@
             <span>牌组</span>
           </div>
         </el-tooltip>
+        <!-- 目录 -->
+        <el-tooltip content="添加到目录" placement="top">
+          <div class="toolbar-item" @click="addToDirectory">
+            <el-icon><List /></el-icon>
+            <span>目录</span>
+          </div>
+        </el-tooltip>
       </div>
     </div>
 
@@ -398,7 +477,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, onUnmounted } from 'vue'
+import { ref, computed, onMounted, nextTick, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCasesStore } from '@/stores'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -429,6 +508,16 @@ const tocCollapsed = ref(false)
 const currentSection = ref('')
 const activeCommentId = ref(null)
 const expandedCommentIds = ref([])
+
+// 编辑模式
+const isEditing = ref(false)
+const editableParagraphs = ref([])
+
+// 目录
+const tocItems = ref([])
+const editingTocIndex = ref(-1)
+const editingTocTitle = ref('')
+const tocEditInput = ref(null)
 
 // 设置
 const fontSize = ref(16)
@@ -518,19 +607,12 @@ const annotationPopupPosition = ref({ top: '0px', left: '0px' })
 const shareLink = ref('https://enoflaw.com/share/case/123')
 const sharePermission = ref('readonly')
 
-// 目录
-const tableOfContents = ref([
-  { id: 'header', title: '案例标题' },
-  { id: 'facts', title: '案件事实' },
-  { id: 'issues', title: '争议焦点' },
-  { id: 'reasoning', title: '判决理由' },
-  { id: 'conclusion', title: '结论' }
-])
-
 // ==================== 计算属性 ====================
-const caseParagraphs = computed(() => {
+const displayParagraphs = computed(() => {
   if (!currentCase.value?.content) return []
-  return currentCase.value.content.split('\n').filter(p => p.trim())
+  const paras = currentCase.value.content.split('\n').filter(p => p.trim())
+  // 移除正文中的段落编号 (如 "1. ", "(1) ", "1 ")
+  return paras.map(p => p.replace(/^\s*\(?\d+[\.\)]?\s*/, ''))
 })
 
 const sortedComments = computed(() => {
@@ -547,6 +629,9 @@ onMounted(() => {
     return
   }
 
+  // 初始化可编辑段落
+  editableParagraphs.value = displayParagraphs.value.map(p => p)
+
   expandedCommentIds.value = comments.value.map(c => c.id)
   document.addEventListener('mousedown', handleDocumentClick)
 })
@@ -556,6 +641,171 @@ onUnmounted(() => {
   delete window.handleAnnotationClick
   delete window.handleCommentMarkerClick
 })
+
+// ==================== 编辑模式 ====================
+const toggleEditMode = () => {
+  isEditing.value = !isEditing.value
+  if (isEditing.value) {
+    // 进入编辑模式，同步当前显示内容到编辑器
+    editableParagraphs.value = displayParagraphs.value.map(p => p)
+    showAnnotationToolbar.value = false
+    showAnnotationPopup.value = false
+  } else {
+    // 退出编辑模式，保存更改
+    // 这里简单地将段落合并回 content
+    // 注意：这可能会破坏基于偏移量的标注，实际项目中需要更复杂的处理
+    const newContent = editableParagraphs.value.join('\n')
+    currentCase.value.content = newContent
+    ElMessage.success('已保存更改')
+  }
+}
+
+const handleParagraphChange = (index, val) => {
+  editableParagraphs.value[index] = val
+}
+
+// 段落输入框引用
+const paragraphInputRefs = ref([])
+const setParagraphInputRef = (el, index) => {
+  if (el) {
+    paragraphInputRefs.value[index] = el
+  }
+}
+
+// 处理回车键 - 在光标位置拆分段落或创建新段落
+const handleParagraphEnter = (index, event) => {
+  const currentText = editableParagraphs.value[index]
+  const input = paragraphInputRefs.value[index]
+
+  if (!input) return
+
+  const textarea = input.$el.querySelector('textarea')
+  if (!textarea) return
+
+  const cursorPosition = textarea.selectionStart
+  const textBeforeCursor = currentText.substring(0, cursorPosition)
+  const textAfterCursor = currentText.substring(cursorPosition)
+
+  // 更新当前段落为光标前的内容
+  editableParagraphs.value[index] = textBeforeCursor
+
+  // 在当前段落后插入新段落，内容为光标后的内容
+  editableParagraphs.value.splice(index + 1, 0, textAfterCursor)
+
+  // 聚焦到新段落
+  nextTick(() => {
+    const newInput = paragraphInputRefs.value[index + 1]
+    if (newInput) {
+      newInput.focus()
+      // 将光标移到新段落开头
+      const newTextarea = newInput.$el.querySelector('textarea')
+      if (newTextarea) {
+        newTextarea.setSelectionRange(0, 0)
+      }
+    }
+  })
+}
+
+// 处理删除键 - 如果段落为空且不是第一段，则删除并合并到上一段
+const handleParagraphDelete = (index, event) => {
+  const currentText = editableParagraphs.value[index]
+  // 只有当段落为空且不是第一段时才删除
+  if (currentText === '' && index > 0) {
+    event.preventDefault()
+    // 删除当前段落
+    editableParagraphs.value.splice(index, 1)
+    // 聚焦到上一段末尾
+    nextTick(() => {
+      const prevInput = paragraphInputRefs.value[index - 1]
+      if (prevInput) {
+        prevInput.focus()
+        const textarea = prevInput.$el.querySelector('textarea')
+        if (textarea) {
+          const len = textarea.value.length
+          textarea.setSelectionRange(len, len)
+        }
+      }
+    })
+  }
+}
+
+// 删除段落
+const removeParagraph = (index) => {
+  if (editableParagraphs.value.length <= 1) {
+    ElMessage.warning('至少需要保留一个段落')
+    return
+  }
+  editableParagraphs.value.splice(index, 1)
+  ElMessage.success('已删除段落')
+}
+
+// ==================== 目录管理 ====================
+const addToDirectory = () => {
+  if (!selectedText.value) return
+  
+  const title = selectedText.value.length > 20 
+    ? selectedText.value.substring(0, 20) + '...' 
+    : selectedText.value
+
+  tocItems.value.push({
+    id: 'toc-' + Date.now(),
+    title: title,
+    level: 1,
+    paragraphIndex: selectedParagraphIndex.value
+  })
+  
+  ElMessage.success('已添加到目录')
+  showAnnotationToolbar.value = false
+  window.getSelection().removeAllRanges()
+}
+
+const updateTocLevel = (index, change) => {
+  const item = tocItems.value[index]
+  const newLevel = item.level + change
+  if (newLevel >= 1 && newLevel <= 3) {
+    item.level = newLevel
+  }
+}
+
+const removeTocItem = (index) => {
+  tocItems.value.splice(index, 1)
+}
+
+// 开始编辑目录项
+const startEditToc = (index) => {
+  editingTocIndex.value = index
+  editingTocTitle.value = tocItems.value[index].title
+  nextTick(() => {
+    tocEditInput.value?.focus()
+  })
+}
+
+// 保存目录编辑
+const saveTocEdit = () => {
+  if (editingTocIndex.value >= 0 && editingTocTitle.value.trim()) {
+    tocItems.value[editingTocIndex.value].title = editingTocTitle.value.trim()
+  }
+  editingTocIndex.value = -1
+  editingTocTitle.value = ''
+}
+
+// 取消目录编辑
+const cancelTocEdit = () => {
+  editingTocIndex.value = -1
+  editingTocTitle.value = ''
+}
+
+const scrollToParagraph = (index) => {
+  const el = document.querySelector(`[data-paragraph-index="${index}"]`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    // 高亮一下目标段落
+    el.style.backgroundColor = 'rgba(252, 211, 77, 0.2)'
+    setTimeout(() => {
+      el.style.backgroundColor = ''
+    }, 1500)
+  }
+}
 
 // ==================== 文档点击处理 ====================
 const handleDocumentClick = (e) => {
@@ -586,6 +836,8 @@ const handleMouseDown = () => {
 }
 
 const handleTextSelection = () => {
+  if (isEditing.value) return // 编辑模式下禁用标注
+
   const selection = window.getSelection()
   const text = selection.toString().trim()
 
@@ -603,7 +855,7 @@ const handleTextSelection = () => {
     const rect = range.getBoundingClientRect()
     toolbarPosition.value = {
       top: rect.top - 60 + 'px',
-      left: Math.max(10, rect.left + rect.width / 2 - 180) + 'px'
+      left: Math.max(10, rect.left + rect.width / 2 - 200) + 'px' // 调整位置以适应更多按钮
     }
 
     showAnnotationToolbar.value = true
@@ -753,6 +1005,8 @@ window.handleAnnotationClick = (annotationId, event) => {
     left: rect.left + rect.width / 2 - 30 + 'px'
   }
   showAnnotationPopup.value = true
+  // 确保不打开评论面板
+  // showCommentsPanel.value = false // 用户可能希望保持评论面板状态，只是不弹出
 }
 
 window.handleCommentMarkerClick = (commentId, event) => {
@@ -1076,10 +1330,6 @@ const addToDeck = () => {
 
 const attachFile = () => { ElMessage.info('附件功能') }
 
-const scrollToSection = (sectionId) => {
-  currentSection.value = sectionId
-  ElMessage.info(`跳转到: ${sectionId}`)
-}
 </script>
 
 <style lang="scss" scoped>
@@ -1164,7 +1414,7 @@ const scrollToSection = (sectionId) => {
 
 // 左侧目录
 .toc-sidebar {
-  width: 200px;
+  width: 240px;
   background: white;
   border-right: 1px solid $border-light;
   display: flex;
@@ -1189,20 +1439,72 @@ const scrollToSection = (sectionId) => {
     overflow-y: auto;
     padding: $spacing-sm;
 
+    .empty-toc {
+      padding: $spacing-lg;
+      text-align: center;
+      color: $text-tertiary;
+      font-size: 0.875rem;
+    }
+
+    .toc-item-wrapper {
+      margin-bottom: 2px;
+    }
+
     .toc-item {
       padding: $spacing-sm $spacing-md;
       cursor: pointer;
       border-radius: $radius-md;
       transition: all $transition-fast;
       font-size: 0.875rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
 
       &:hover {
         background: $bg-secondary;
+        
+        .toc-actions {
+          opacity: 1;
+        }
       }
 
       &.active {
         background: rgba($primary, 0.1);
         color: $primary;
+      }
+
+      .toc-text {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .toc-actions {
+        display: flex;
+        gap: 4px;
+        opacity: 0;
+        transition: opacity 0.2s;
+
+        .el-icon {
+          padding: 2px;
+          border-radius: 4px;
+          cursor: pointer;
+          &:hover {
+            background: rgba(0,0,0,0.1);
+          }
+        }
+      }
+
+      &.toc-editing {
+        padding: 4px 8px;
+        background: #e6f7ff;
+        border: 1px solid #1890ff;
+        border-radius: 4px;
+
+        .el-input {
+          width: 100%;
+        }
       }
     }
   }
@@ -1244,6 +1546,45 @@ const scrollToSection = (sectionId) => {
       min-width: 30px;
       text-align: right;
       user-select: none;
+      padding-top: 2px;
+    }
+
+    .paragraph-editor {
+      flex: 1;
+
+      .editor-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+
+        .paragraph-number-edit {
+          min-width: 24px;
+          text-align: right;
+          color: #999;
+          font-size: 12px;
+          line-height: 32px;
+          user-select: none;
+        }
+
+        .el-textarea {
+          flex: 1;
+        }
+
+        .delete-paragraph-btn {
+          opacity: 0;
+          transition: opacity 0.2s;
+          padding: 4px;
+          margin-top: 4px;
+
+          &:hover {
+            color: #f56c6c;
+          }
+        }
+
+        &:hover .delete-paragraph-btn {
+          opacity: 1;
+        }
+      }
     }
 
     .paragraph-text {

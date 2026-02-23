@@ -313,6 +313,8 @@ export const useStudySetsStore = defineStore('studySets', () => {
   return { studySets }
 })
 
+import { sendChatMessage } from '@/services/ai.js'
+
 // AI Assistant Store
 export const useAIStore = defineStore('ai', () => {
   const messages = ref([
@@ -323,6 +325,9 @@ export const useAIStore = defineStore('ai', () => {
     }
   ])
 
+  const isLoading = ref(false)
+  const error = ref(null)
+
   const quickActions = [
     { label: '总结当前案例', icon: 'Document' },
     { label: '解释选中术语', icon: 'Collection' },
@@ -330,22 +335,65 @@ export const useAIStore = defineStore('ai', () => {
     { label: '生成测验', icon: 'QuestionFilled' }
   ]
 
-  const sendMessage = (content) => {
+  const sendMessage = async (content) => {
+    // 添加用户消息
     messages.value.push({
       role: 'user',
       content,
       timestamp: new Date().toISOString()
     })
 
-    // Simulate AI response
-    setTimeout(() => {
+    isLoading.value = true
+    error.value = null
+
+    try {
+      // 准备历史消息（只保留最近10条，避免超出token限制）
+      const historyMessages = messages.value
+        .slice(-11, -1) // 排除刚刚添加的用户消息和第一条欢迎消息
+        .map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }))
+
+      // 调用 AI API
+      const aiResponse = await sendChatMessage(historyMessages)
+
+      // 添加 AI 回复
       messages.value.push({
         role: 'assistant',
-        content: `根据您的案例库，我来为您分析：\n\n【法律概念】Consideration 对价\n\n对价是合同成立的必备要素，指的是合同双方为换取对方承诺而付出的价值。\n\n在您收藏的案例中：\n1. Currie v. Misa (1875) - 经典对价定义\n2. Smith v. Jones - 其中提到："缺乏充分对价导致合同无法执行"\n\n关键要点：\n• 对价必须具有法律价值，但不需要充分(adequate)\n• 过去的对价通常不构成有效对价\n• 履行现有义务一般不构成对价`,
+        content: aiResponse,
         timestamp: new Date().toISOString()
       })
-    }, 1000)
+    } catch (err) {
+      error.value = err.message || '请求失败，请稍后重试'
+      // 添加错误提示消息
+      messages.value.push({
+        role: 'assistant',
+        content: `抱歉，我遇到了一些问题：${error.value}。请稍后重试。`,
+        timestamp: new Date().toISOString()
+      })
+    } finally {
+      isLoading.value = false
+    }
   }
 
-  return { messages, quickActions, sendMessage }
+  const clearMessages = () => {
+    messages.value = [
+      {
+        role: 'assistant',
+        content: '您好！我是EnofLaw AI助手。我可以帮您分析案例、解释法律概念或回答关于您案例库的问题。请问有什么可以帮您？',
+        timestamp: new Date().toISOString()
+      }
+    ]
+    error.value = null
+  }
+
+  return {
+    messages,
+    quickActions,
+    isLoading,
+    error,
+    sendMessage,
+    clearMessages
+  }
 })
