@@ -85,36 +85,41 @@
         </div>
       </div>
 
-      <button class="collapse-btn" @click="folderSidebarCollapsed = !folderSidebarCollapsed">
+      <button class="collapse-btn" @click="toggleFolderSidebar">
         <el-icon><Fold v-if="!folderSidebarCollapsed" /><Expand v-else /></el-icon>
       </button>
     </aside>
 
     <!-- 中间：笔记列表 -->
-    <div class="notes-list-panel" :class="{ 'expanded': !selectedNote }">
-      <div class="list-header">
-        <div class="list-title">
-          <h3>{{ currentFolderName }}</h3>
-          <span class="note-total">{{ filteredNotes.length }} 条笔记</span>
+    <div class="notes-list-panel" :class="{ 'expanded': !selectedNote, 'collapsed': notesListCollapsed }">
+      <button class="collapse-list-btn" @click="toggleNotesList" :class="{ 'collapsed': notesListCollapsed }">
+        <el-icon><ArrowLeft v-if="!notesListCollapsed" /><ArrowRight v-else /></el-icon>
+      </button>
+      
+      <template v-if="!notesListCollapsed">
+        <div class="list-header">
+          <div class="list-title">
+            <h3>{{ currentFolderName }}</h3>
+            <span class="note-total">{{ filteredNotes.length }} 条笔记</span>
+          </div>
+          <div class="list-actions">
+            <el-input
+              v-model="searchKeyword"
+              placeholder="搜索笔记..."
+              size="small"
+              clearable
+              class="search-input"
+            >
+              <template #prefix>
+                <el-icon><Search /></el-icon>
+              </template>
+            </el-input>
+            <el-button type="primary" size="small" @click="createNote">
+              <el-icon><Plus /></el-icon>
+              新建笔记
+            </el-button>
+          </div>
         </div>
-        <div class="list-actions">
-          <el-input
-            v-model="searchKeyword"
-            placeholder="搜索笔记..."
-            size="small"
-            clearable
-            class="search-input"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
-          <el-button type="primary" size="small" @click="createNote">
-            <el-icon><Plus /></el-icon>
-            新建笔记
-          </el-button>
-        </div>
-      </div>
 
       <div class="notes-list" ref="notesListRef">
         <div
@@ -164,10 +169,11 @@
           <p class="empty-hint">点击右上角"新建笔记"按钮创建</p>
         </div>
       </div>
+      </template>
     </div>
 
     <!-- 右侧：笔记编辑器 -->
-    <div class="note-editor-panel" v-if="selectedNote">
+    <div class="note-editor-panel" v-if="selectedNote" :class="{ 'is-fullscreen': isFullscreen }">
       <div class="editor-header">
         <div class="editor-nav">
           <el-button text @click="closeEditor">
@@ -245,8 +251,8 @@
             <el-icon><Delete /></el-icon>
           </el-button>
           <!-- 字体颜色 -->
-          <el-dropdown @command="(color) => formatText('foreColor', color)" trigger="click">
-            <el-button text size="small" :class="{ 'is-active': activeFontColor !== '#333' }">
+          <el-dropdown trigger="click">
+            <el-button text size="small" :class="{ 'is-active': activeFontColor !== '#333' }" @click.stop>
               <span class="font-color-icon" :style="{ color: activeFontColor }">A</span>
             </el-button>
             <template #dropdown>
@@ -257,7 +263,7 @@
                     :key="color"
                     class="color-palette-item"
                     :style="{ background: color }"
-                    @click="formatText('foreColor', color)"
+                    @click.stop="formatText('foreColor', color)"
                   ></div>
                 </div>
               </el-dropdown-menu>
@@ -293,16 +299,46 @@
         </div>
         <el-divider direction="vertical" />
         <div class="toolbar-group">
+          <el-button text size="small" @click="showOutlinePanel = !showOutlinePanel" :type="showOutlinePanel ? 'primary' : ''">
+            <el-icon><Document /></el-icon>
+          </el-button>
           <el-button text size="small" @click="toggleCommentsPanel">
             <el-icon><ChatDotRound /></el-icon>
             <span class="comment-count" v-if="noteComments.length > 0">{{ noteComments.length }}</span>
+          </el-button>
+          <el-button text size="small" @click="toggleFullscreen" :type="isFullscreen ? 'primary' : ''">
+            <el-icon><FullScreen /></el-icon>
           </el-button>
         </div>
       </div>
 
       <!-- 编辑器内容区 - 飞书风格即时渲染 -->
       <div class="editor-content-wrapper">
-        <div class="editor-content" ref="editorContentRef">
+        <!-- 左侧目录大纲 -->
+        <div class="outline-panel" v-if="showOutlinePanel && outlineItems.length > 0">
+          <div class="outline-header">
+            <span class="outline-title">目录</span>
+            <el-button text size="small" @click="showOutlinePanel = false">
+              <el-icon><Close /></el-icon>
+            </el-button>
+          </div>
+          <div class="outline-list">
+            <div
+              v-for="item in outlineItems"
+              :key="item.id"
+              class="outline-item"
+              :class="{
+                'is-active': activeOutlineId === item.id,
+                [`level-${item.level}`]: true
+              }"
+              @click="scrollToHeading(item)"
+            >
+              {{ item.text }}
+            </div>
+          </div>
+        </div>
+
+        <div class="editor-content" ref="editorContentRef" :class="{ 'with-outline': showOutlinePanel && outlineItems.length > 0 }">
           <!-- 可编辑区域 -->
           <div
             class="rich-editor"
@@ -312,6 +348,9 @@
             @mouseup="handleTextSelection"
             @mousedown="handleMouseDown"
             @keydown="handleEditorKeydown"
+            @keyup="handleEditorKeyup"
+            @click="handleEditorClick"
+            @scroll="handleEditorScroll"
             v-html="editorContent"
           ></div>
         </div>
@@ -325,84 +364,169 @@
             </el-button>
           </div>
           <div class="resize-handle" @mousedown="startResize"></div>
-          
+
           <div class="comments-list" ref="commentsListRef">
             <div
-              v-for="comment in noteComments"
+              v-for="comment in sortedComments"
               :key="comment.id"
               class="comment-card"
-              :class="{ 'is-active': activeCommentId === comment.id }"
+              :class="{
+                'is-active': activeCommentId === comment.id,
+                'is-expanded': expandedCommentIds.includes(comment.id)
+              }"
               :data-comment-id="comment.id"
             >
-              <!-- 评论头部 - 引用原文 -->
-              <div class="comment-header" @click="scrollToHighlight(comment.id)">
-                <span style="font-size: 1.25rem; color: #909399;">"</span>
-                <span class="quoted-text">{{ comment.selectedText }}</span>
-              </div>
-              
-              <!-- 评论内容 -->
-              <div class="comment-body">
-                <div class="comment-author">
-                  <el-avatar :size="24" :src="comment.avatar" />
-                  <span class="author-name">{{ comment.author }}</span>
-                  <span class="comment-time">{{ formatRelativeTime(comment.createdAt) }}</span>
+              <!-- 评论卡片头部 - 显示引用原文 -->
+              <div class="comment-card-header" @click="toggleCommentExpand(comment.id)">
+                <div class="selected-text-preview">
+                  <span class="quote-icon">"</span>
+                  <span class="text-content">{{ comment.selectedText }}</span>
                 </div>
-                <div class="comment-text">{{ comment.content }}</div>
-                
-                <!-- 评论图片 -->
-                <div class="comment-images" v-if="comment.images?.length">
-                  <img
-                    v-for="(img, idx) in comment.images"
-                    :key="idx"
-                    :src="img"
-                    class="comment-image"
-                    @click="viewImage(img)"
-                    @contextmenu.prevent="showImageContextMenu($event, img)"
+                <div class="expand-icon">
+                  <el-icon v-if="!expandedCommentIds.includes(comment.id)"><ArrowDown /></el-icon>
+                  <el-icon v-else><ArrowUp /></el-icon>
+                </div>
+              </div>
+
+              <!-- 评论内容区域 -->
+              <div v-show="expandedCommentIds.includes(comment.id)" class="comment-card-body">
+                <div class="comment-header">
+                  <el-avatar :size="28" :src="comment.avatar">
+                    {{ comment.author?.charAt(0) || 'U' }}
+                  </el-avatar>
+                  <div class="user-meta">
+                    <span class="user-name">{{ comment.author }}</span>
+                    <span class="comment-time">{{ formatRelativeTime(comment.createdAt) }}</span>
+                  </div>
+                </div>
+
+                <!-- 评论编辑状态 -->
+                <div v-if="editingComment?.id === comment.id" class="comment-edit-area">
+                  <el-input
+                    v-model="editingComment.content"
+                    type="textarea"
+                    :rows="3"
+                    placeholder="编辑评论..."
                   />
+                  <div class="edit-actions">
+                    <el-button size="small" @click="cancelEditComment">取消</el-button>
+                    <el-button type="primary" size="small" @click="saveEditComment">保存</el-button>
+                  </div>
                 </div>
-              </div>
 
-              <!-- 评论操作 -->
-              <div class="comment-actions">
-                <el-button text size="small" @click="replyToComment(comment)">
-                  <el-icon><ChatLineRound /></el-icon>
-                  回复
-                </el-button>
-                <el-button text size="small" @click="editComment(comment)">
-                  <el-icon><Edit /></el-icon>
-                  编辑
-                </el-button>
-                <el-button text size="small" @click="deleteComment(comment)">
-                  <el-icon><Delete /></el-icon>
-                  删除
-                </el-button>
-              </div>
+                <!-- 评论显示状态 -->
+                <template v-else>
+                  <div class="comment-content markdown-body" v-html="renderMarkdown(comment.content)"></div>
 
-              <!-- 回复列表 -->
-              <div class="replies-list" v-if="comment.replies?.length">
-                <div
-                  v-for="reply in comment.replies"
-                  :key="reply.id"
-                  class="reply-item"
-                >
-                  <div class="reply-author">
-                    <el-avatar :size="20" :src="reply.avatar" />
-                    <span class="author-name">{{ reply.author }}</span>
-                    <span class="reply-time">{{ formatRelativeTime(reply.createdAt) }}</span>
-                  </div>
-                  <div class="reply-text">{{ reply.content }}</div>
-                  <div class="reply-images" v-if="reply.images?.length">
-                    <img
-                      v-for="(img, idx) in reply.images"
-                      :key="idx"
-                      :src="img"
-                      class="reply-image"
+                  <!-- 评论图片 -->
+                  <div v-if="comment.images?.length" class="comment-images">
+                    <div
+                      v-for="(img, imgIndex) in comment.images"
+                      :key="imgIndex"
+                      class="image-thumbnail"
                       @click="viewImage(img)"
-                    />
+                      @contextmenu.prevent="showImageContextMenu($event, img)"
+                    >
+                      <img :src="img" alt="评论图片" />
+                    </div>
                   </div>
-                  <div class="reply-actions">
-                    <el-button text size="small" @click="editReply(comment, reply)">编辑</el-button>
-                    <el-button text size="small" @click="deleteReply(comment, reply)">删除</el-button>
+                </template>
+
+                <div v-if="editingComment?.id !== comment.id" class="comment-actions-bar">
+                  <el-button text size="small" @click="likeComment(comment)">
+                    <el-icon><CircleCheck /></el-icon>
+                    <span v-if="comment.likes">{{ comment.likes }}</span>
+                  </el-button>
+                  <el-button text size="small" @click="replyToComment(comment)">
+                    回复
+                  </el-button>
+                  <el-dropdown trigger="click" @command="handleCommentAction($event, comment)">
+                    <el-button text size="small">
+                      <el-icon><More /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                        <el-dropdown-item command="delete" divided type="danger">删除</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </div>
+
+                <!-- 回复列表 -->
+                <div v-if="comment.replies?.length" class="replies-list">
+                  <div
+                    v-for="reply in comment.replies"
+                    :key="reply.id"
+                    class="reply-item"
+                  >
+                    <div class="reply-header">
+                      <el-avatar :size="20" :src="reply.avatar">
+                        {{ reply.author?.charAt(0) || 'U' }}
+                      </el-avatar>
+                      <span class="reply-user">{{ reply.author }}</span>
+                      <span class="reply-time">{{ formatRelativeTime(reply.createdAt) }}</span>
+                      <!-- 回复操作按钮 -->
+                      <div class="reply-actions">
+                        <el-button text size="small" @click="editReply(comment, reply)">
+                          <el-icon><Edit /></el-icon>
+                        </el-button>
+                        <el-button text size="small" @click="deleteReply(comment, reply)">
+                          <el-icon><Delete /></el-icon>
+                        </el-button>
+                      </div>
+                    </div>
+                    <!-- 回复编辑模式 -->
+                    <div v-if="editingReply?.replyId === reply.id" class="reply-edit-area">
+                      <!-- 回复编辑图片预览 -->
+                      <div v-if="editingReply.images?.length" class="reply-edit-images">
+                        <div
+                          v-for="(img, imgIndex) in editingReply.images"
+                          :key="imgIndex"
+                          class="image-preview-item"
+                        >
+                          <img :src="img" alt="预览图片" />
+                          <el-button
+                            class="remove-image-btn"
+                            text
+                            size="small"
+                            @click="removeReplyEditImage(imgIndex)"
+                          >
+                            <el-icon><Close /></el-icon>
+                          </el-button>
+                        </div>
+                      </div>
+                      <el-input
+                        v-model="editingReply.content"
+                        type="textarea"
+                        :rows="2"
+                        :placeholder="'编辑回复...（支持拖拽或粘贴图片）'"
+                        @drop="handleReplyEditImageDrop"
+                        @dragover.prevent
+                        @paste="handleReplyEditImagePaste"
+                      />
+                      <div class="reply-edit-actions">
+                        <span class="image-hint">支持拖拽或粘贴图片</span>
+                        <div class="action-btns">
+                          <el-button size="small" @click="cancelEditReply">取消</el-button>
+                          <el-button type="primary" size="small" @click="saveReplyEdit">保存</el-button>
+                        </div>
+                      </div>
+                    </div>
+                    <!-- 回复内容 -->
+                    <div v-else class="reply-content" v-html="renderMarkdown(reply.content)"></div>
+                    <!-- 回复图片 -->
+                    <div v-if="reply.images?.length" class="reply-images">
+                      <div
+                        v-for="(img, imgIndex) in reply.images"
+                        :key="imgIndex"
+                        class="image-thumbnail"
+                        @click="viewImage(img)"
+                        @contextmenu.prevent="showImageContextMenu($event, img)"
+                      >
+                        <img :src="img" alt="回复图片" />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -540,66 +664,179 @@
 
         <!-- 评论 -->
         <el-tooltip content="评论" placement="top">
-          <div class="toolbar-item icon-only" @click="addComment">
-            <el-icon><ChatDotRound /></el-icon>
-          </div>
+          <el-button text size="small" class="toolbar-item icon-only format-btn" @click="addComment">
+            <el-icon class="format-icon-svg"><ChatDotRound /></el-icon>
+          </el-button>
         </el-tooltip>
 
         <!-- 加粗 -->
         <el-tooltip content="加粗" placement="top">
-          <div class="toolbar-item icon-only" @click="formatSelection('bold')">
-            <span style="font-weight: bold; font-size: 1rem;">B</span>
-          </div>
+          <el-button text size="small" class="toolbar-item icon-only format-btn" :class="{ active: isBold }" @click="formatSelection('bold')">
+            <span class="format-icon">B</span>
+          </el-button>
         </el-tooltip>
 
         <!-- 斜体 -->
         <el-tooltip content="斜体" placement="top">
-          <div class="toolbar-item icon-only" @click="formatSelection('italic')">
-            <span style="font-style: italic; font-size: 1rem;">I</span>
-          </div>
+          <el-button text size="small" class="toolbar-item icon-only format-btn" :class="{ active: isItalic }" @click="formatSelection('italic')">
+            <span class="format-icon italic">I</span>
+          </el-button>
         </el-tooltip>
 
         <!-- 下划线（无颜色选择） -->
         <el-tooltip content="下划线" placement="top">
-          <div class="toolbar-item icon-only" @click="formatSelection('underline')">
-            <span style="text-decoration: underline; font-size: 1rem;">U</span>
-          </div>
+          <el-button text size="small" class="toolbar-item icon-only format-btn" :class="{ active: isUnderline }" @click="formatSelection('underline')">
+            <span class="format-icon underline">U</span>
+          </el-button>
         </el-tooltip>
 
         <!-- 删除线 -->
         <el-tooltip content="删除线" placement="top">
-          <div class="toolbar-item icon-only" @click="formatSelection('strikeThrough')">
-            <span style="text-decoration: line-through; font-size: 1rem;">S</span>
-          </div>
+          <el-button text size="small" class="toolbar-item icon-only format-btn" :class="{ active: isStrikeThrough }" @click="formatSelection('strikeThrough')">
+            <span class="format-icon strikethrough">S</span>
+          </el-button>
         </el-tooltip>
 
         <!-- 链接 -->
         <el-tooltip content="链接" placement="top">
-          <div class="toolbar-item icon-only" @click="addLinkToSelection">
-            <el-icon><Link /></el-icon>
-          </div>
+          <el-button text size="small" class="toolbar-item icon-only format-btn" @click="addLinkToSelection">
+            <el-icon class="format-icon-svg"><Link /></el-icon>
+          </el-button>
         </el-tooltip>
 
         <!-- 翻译 -->
         <el-tooltip content="翻译" placement="top">
-          <div class="toolbar-item icon-only" @click="translateSelection">
-            <el-icon><DocumentCopy /></el-icon>
-          </div>
+          <el-button text size="small" class="toolbar-item icon-only format-btn" @click="translateSelection">
+            <span class="format-icon">译</span>
+          </el-button>
+        </el-tooltip>
+
+        <!-- 复制 -->
+        <el-tooltip content="复制" placement="top">
+          <el-button text size="small" class="toolbar-item icon-only format-btn" @click="copySelection">
+            <el-icon class="format-icon-svg"><DocumentCopy /></el-icon>
+          </el-button>
         </el-tooltip>
       </div>
     </div>
 
 
 
+    <!-- 翻译弹窗 -->
+    <div
+      v-if="showTranslationPopup"
+      class="translation-popup"
+      :style="translationPosition"
+    >
+      <div class="translation-header">
+        <span>翻译</span>
+        <el-button text size="small" @click="showTranslationPopup = false">
+          <el-icon><Close /></el-icon>
+        </el-button>
+      </div>
+      <div class="translation-content">
+        <div class="original-text">{{ selectedText }}</div>
+        <div class="translated-text">{{ translatedText }}</div>
+      </div>
+    </div>
+
     <!-- 图片查看器 -->
     <div v-if="showImageViewer" class="image-viewer" @click="closeImageViewer">
       <img :src="viewingImage" @click.stop />
     </div>
+
+    <!-- 标签管理对话框 -->
+    <el-dialog
+      v-model="showTagManager"
+      title="管理标签"
+      width="500px"
+      :close-on-click-modal="false"
+      destroy-on-close
+    >
+      <div class="tag-manager-content">
+        <!-- 搜索框 -->
+        <div class="tag-search-box">
+          <el-input
+            v-model="tagSearchQuery"
+            placeholder="搜索或创建标签..."
+            class="tag-search-input"
+            @keyup.enter="createNewTag"
+          >
+            <template #suffix>
+              <el-button
+                v-if="tagSearchQuery && !filteredTags.length"
+                type="primary"
+                link
+                @click="createNewTag"
+              >
+                创建
+              </el-button>
+            </template>
+          </el-input>
+        </div>
+
+        <!-- 标签列表 -->
+        <div class="tag-list-section">
+          <div class="tag-section-title">所有标签（点击多选）</div>
+          <div class="tag-select-list">
+            <div
+              v-for="tag in filteredTags"
+              :key="tag.id"
+              class="tag-select-item"
+              :class="{ 'is-selected': selectedTags.includes(tag.id) }"
+              @click="toggleTagSelection(tag.id)"
+            >
+              <span
+                class="tag-color-dot"
+                :style="{ backgroundColor: tag.color }"
+              ></span>
+              <span class="tag-name">{{ tag.name }}</span>
+              <span class="tag-count">({{ tag.usageCount }})</span>
+              <el-icon v-if="selectedTags.includes(tag.id)" class="tag-check-icon"><Check /></el-icon>
+              <el-button
+                text
+                size="small"
+                class="tag-delete-btn"
+                @click.stop="deleteTag(tag.id)"
+              >
+                <el-icon><Delete /></el-icon>
+              </el-button>
+            </div>
+          </div>
+          <div v-if="!filteredTags.length && tagSearchQuery" class="tag-empty-tip">
+            未找到标签，按回车或点击"创建"按钮创建新标签
+          </div>
+        </div>
+
+        <!-- 已选标签预览 -->
+        <div v-if="selectedTags.length > 0" class="selected-tags-preview">
+          <div class="tag-section-title">已选择 {{ selectedTags.length }} 个标签</div>
+          <div class="selected-tags-list">
+            <el-tag
+              v-for="tagId in selectedTags"
+              :key="tagId"
+              closable
+              :color="tags.find(t => t.id === tagId)?.color"
+              @close="toggleTagSelection(tagId)"
+            >
+              {{ tags.find(t => t.id === tagId)?.name }}
+            </el-tag>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="tag-manager-footer">
+          <el-button @click="closeTagManager">取消</el-button>
+          <el-button type="primary" @click="saveTagChanges">保存</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Folder, FolderOpened, Plus, Edit, Delete, CollectionTag, Search,
@@ -607,11 +844,13 @@ import {
   Share, Download, More, Close, ChatDotRound, ChatLineRound,
   Picture, EditPen, List, Sort,
   Check, Link, Grid, DocumentCopy, View, Hide, RefreshRight, ArrowUp,
-  Paperclip
+  Paperclip, CircleCheck, FullScreen
 } from '@element-plus/icons-vue'
+import { marked } from 'marked'
 
 // ============ 状态管理 ============
 const folderSidebarCollapsed = ref(false)
+const notesListCollapsed = ref(false)
 const selectedFolderId = ref('all')
 const selectedTagId = ref(null)
 const selectedNote = ref(null)
@@ -630,6 +869,17 @@ const noteComments = ref([])
 const activeCommentId = ref(null)
 const showCommentInput = ref(false)
 const replyingTo = ref(null)
+const expandedCommentIds = ref([])
+const editingCommentId = ref(null)
+
+// 目录大纲
+const outlineItems = ref([])
+const showOutlinePanel = ref(true)
+const activeOutlineId = ref(null)
+const outlineUpdateTimer = ref(null) // 目录更新定时器
+
+// 全屏编辑
+const isFullscreen = ref(false)
 
 // 选中文字工具栏
 const showAnnotationToolbar = ref(false)
@@ -643,9 +893,18 @@ const activeFontColor = ref('#333333')
 const highlightColors = ['#ffeb3b', '#ff9800', '#4caf50', '#2196f3', '#9c27b0', '#f44336']
 const fontColors = ['#333333', '#f44336', '#ff9800', '#ffeb3b', '#4caf50', '#2196f3', '#9c27b0', '#9e9e9e']
 
+// 翻译弹窗
+const showTranslationPopup = ref(false)
+const translationPosition = ref({ top: '0px', left: '0px' })
+const translatedText = ref('')
+
 // 评论输入
 const newCommentContent = ref('')
 const newCommentImages = ref([])
+
+// 编辑状态
+const editingComment = ref(null)
+const editingReply = ref(null)
 
 // 图片查看器
 const showImageViewer = ref(false)
@@ -656,6 +915,12 @@ const isBold = ref(false)
 const isItalic = ref(false)
 const isUnderline = ref(false)
 const isStrikeThrough = ref(false)
+
+// 标签管理对话框
+const showTagManager = ref(false)
+const tagSearchQuery = ref('')
+const selectedTags = ref([])
+const tagManagerActiveTab = ref('current') // 'current' 或 'all'
 
 // ============ 文件夹数据 ============
 const folders = ref([
@@ -777,6 +1042,28 @@ const currentFolderName = computed(() => {
   return folder ? folder.name : '全部笔记'
 })
 
+// 排序后的评论列表 - 按照在文档中出现的顺序排列
+const sortedComments = computed(() => {
+  // 获取编辑器中所有评论标记的顺序
+  const editorMarks = editorRef.value?.querySelectorAll('.comment-mark') || []
+  const markOrder = Array.from(editorMarks).map(mark => mark.dataset.commentId)
+
+  return [...noteComments.value].sort((a, b) => {
+    const indexA = markOrder.indexOf(a.id)
+    const indexB = markOrder.indexOf(b.id)
+
+    // 如果都在文档中有标记，按照文档中的顺序
+    if (indexA !== -1 && indexB !== -1) {
+      return indexA - indexB
+    }
+    // 如果只有一个在文档中，文档中的排在前面
+    if (indexA !== -1) return -1
+    if (indexB !== -1) return 1
+    // 都不在文档中，按创建时间倒序
+    return new Date(b.createdAt) - new Date(a.createdAt)
+  })
+})
+
 const filteredNotes = computed(() => {
   let result = notes.value
 
@@ -823,6 +1110,34 @@ function selectTag(tagId) {
 
 function toggleFolder(folder) {
   folder.collapsed = !folder.collapsed
+}
+
+function toggleNotesList() {
+  // 如果笔记列表当前是展开的，则收缩它
+  if (!notesListCollapsed.value) {
+    notesListCollapsed.value = true
+  } else {
+    // 如果笔记列表当前是收缩的，先检查笔记库栏是否收缩
+    // 如果笔记库栏也是收缩的，必须先打开笔记库栏
+    if (folderSidebarCollapsed.value) {
+      folderSidebarCollapsed.value = false
+      // 延迟展开笔记列表，确保笔记库栏先展开
+      setTimeout(() => {
+        notesListCollapsed.value = false
+      }, 100)
+    } else {
+      notesListCollapsed.value = false
+    }
+  }
+}
+
+function toggleFolderSidebar() {
+  // 如果笔记库栏当前是展开的，则收缩它
+  if (!folderSidebarCollapsed.value) {
+    folderSidebarCollapsed.value = true
+  } else {
+    folderSidebarCollapsed.value = false
+  }
 }
 
 function selectNote(note) {
@@ -988,16 +1303,29 @@ function formatBlock(tag) {
   onEditorInput()
 }
 
-function formatText(command) {
-  document.execCommand(command, false, null)
+function formatText(command, value = null) {
+  document.execCommand(command, false, value)
   onEditorInput()
   updateFormatStates()
 }
 
 function formatSelection(command) {
+  // 保存当前选区
+  const selection = window.getSelection()
+  if (selection.rangeCount === 0) return
+  
+  const range = selection.getRangeAt(0)
+  
+  // 先恢复选区（防止选区丢失）
+  selection.removeAllRanges()
+  selection.addRange(range)
+  
+  // 应用格式
   document.execCommand(command, false, null)
   onEditorInput()
-  showAnnotationToolbar.value = false
+  
+  // 更新格式状态
+  updateFormatStates()
 }
 
 function insertLink() {
@@ -1055,6 +1383,12 @@ function insertCode() {
   onEditorInput()
 }
 
+function insertCheckbox() {
+  const html = '<div style="display:flex;align-items:center;gap:8px;margin:8px 0;"><input type="checkbox" style="width:16px;height:16px;cursor:pointer;"><span>待办事项</span></div><p><br></p>'
+  document.execCommand('insertHTML', false, html)
+  onEditorInput()
+}
+
 function updateFormatStates() {
   isBold.value = document.queryCommandState('bold')
   isItalic.value = document.queryCommandState('italic')
@@ -1068,11 +1402,317 @@ function handleEditorKeydown(e) {
     e.preventDefault()
     saveNote()
   }
+
+  // 回车键在标题后创建新段落
+  if (e.key === 'Enter') {
+    handleEnterKey(e)
+  }
+}
+
+// 处理按键抬起 - 用于即时渲染
+function handleEditorKeyup(e) {
+  // 空格键触发即时渲染
+  if (e.key === ' ') {
+    handleMarkdownShortcut(e)
+  }
+}
+
+// 处理 Markdown 快捷语法
+function handleMarkdownShortcut(e) {
+  const selection = window.getSelection()
+  if (!selection.rangeCount) return
+
+  const range = selection.getRangeAt(0)
+  const currentNode = range.startContainer
+
+  // 获取当前行
+  let lineElement = currentNode.nodeType === Node.TEXT_NODE
+    ? currentNode.parentElement
+    : currentNode
+
+  // 找到块级元素
+  while (lineElement && !['P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI'].includes(lineElement.tagName)) {
+    lineElement = lineElement.parentElement
+  }
+
+  if (!lineElement) return
+
+  const lineText = lineElement.textContent || ''
+
+  // 检查是否是 Markdown 语法（在行首）
+  // 注意：这里检查原始文本，因为空格已经输入了
+  const h1Match = lineText.match(/^(#{1})\s(.+)$/)
+  const h2Match = lineText.match(/^(#{2})\s(.+)$/)
+  const h3Match = lineText.match(/^(#{3})\s(.+)$/)
+  const h4Match = lineText.match(/^(#{4})\s(.+)$/)
+  const h5Match = lineText.match(/^(#{5})\s(.+)$/)
+  const h6Match = lineText.match(/^(#{6})\s(.+)$/)
+  const ulMatch = lineText.match(/^(-|\*)\s(.+)$/)
+  const olMatch = lineText.match(/^(\d+)\.\s(.+)$/)
+  const quoteMatch = lineText.match(/^(>)\s(.+)$/)
+
+  let matched = false
+  let matchResult = null
+  let tagName = ''
+
+  if (h6Match) {
+    matched = true
+    matchResult = h6Match
+    tagName = 'h6'
+  } else if (h5Match) {
+    matched = true
+    matchResult = h5Match
+    tagName = 'h5'
+  } else if (h4Match) {
+    matched = true
+    matchResult = h4Match
+    tagName = 'h4'
+  } else if (h3Match) {
+    matched = true
+    matchResult = h3Match
+    tagName = 'h3'
+  } else if (h2Match) {
+    matched = true
+    matchResult = h2Match
+    tagName = 'h2'
+  } else if (h1Match) {
+    matched = true
+    matchResult = h1Match
+    tagName = 'h1'
+  } else if (ulMatch) {
+    matched = true
+    matchResult = ulMatch
+  } else if (olMatch) {
+    matched = true
+    matchResult = olMatch
+  } else if (quoteMatch) {
+    matched = true
+    matchResult = quoteMatch
+  }
+
+  if (matched) {
+    e.preventDefault()
+    e.stopPropagation()
+
+    if (tagName) {
+      convertToHeading(lineElement, tagName, matchResult[2])
+    } else if (ulMatch) {
+      convertToList(lineElement, 'ul', matchResult[2])
+    } else if (olMatch) {
+      convertToList(lineElement, 'ol', matchResult[2], parseInt(matchResult[1]))
+    } else if (quoteMatch) {
+      convertToQuote(lineElement, matchResult[2])
+    }
+  }
+}
+
+// 转换为标题
+function convertToHeading(element, tagName, text) {
+  const newElement = document.createElement(tagName)
+  newElement.textContent = text
+  newElement.style.margin = '16px 0 12px 0'
+  newElement.style.fontWeight = '600'
+  newElement.style.lineHeight = '1.4'
+  // 关键：设置 contenteditable 使标题可编辑
+  newElement.contentEditable = 'true'
+
+  // 设置字号
+  const fontSizes = {
+    'h1': '1.75rem',
+    'h2': '1.5rem',
+    'h3': '1.25rem',
+    'h4': '1.125rem',
+    'h5': '1rem',
+    'h6': '0.875rem'
+  }
+  newElement.style.fontSize = fontSizes[tagName]
+
+  element.parentNode.replaceChild(newElement, element)
+
+  // 将光标移动到新元素末尾
+  const range = document.createRange()
+  range.selectNodeContents(newElement)
+  range.collapse(false)
+  const selection = window.getSelection()
+  selection.removeAllRanges()
+  selection.addRange(range)
+
+  onEditorInput()
+  updateOutline()
+}
+
+// 转换为列表
+function convertToList(element, listType, text, startNum = null) {
+  const list = document.createElement(listType)
+  if (startNum && listType === 'ol') {
+    list.start = startNum
+  }
+  list.style.margin = '8px 0'
+  list.style.paddingLeft = '24px'
+  // 关键：设置 contenteditable 使列表可编辑
+  list.contentEditable = 'true'
+
+  const li = document.createElement('li')
+  li.textContent = text
+  li.style.marginBottom = '4px'
+  list.appendChild(li)
+
+  element.parentNode.replaceChild(list, element)
+
+  // 将光标移动到列表项末尾
+  const range = document.createRange()
+  range.selectNodeContents(li)
+  range.collapse(false)
+  const selection = window.getSelection()
+  selection.removeAllRanges()
+  selection.addRange(range)
+
+  onEditorInput()
+}
+
+// 转换为引用
+function convertToQuote(element, text) {
+  const blockquote = document.createElement('blockquote')
+  blockquote.textContent = text
+  blockquote.style.borderLeft = '3px solid #409EFF'
+  blockquote.style.paddingLeft = '12px'
+  blockquote.style.margin = '8px 0'
+  blockquote.style.color = '#606266'
+  // 关键：设置 contenteditable 使引用可编辑
+  blockquote.contentEditable = 'true'
+
+  element.parentNode.replaceChild(blockquote, element)
+
+  // 将光标移动到引用末尾
+  const range = document.createRange()
+  range.selectNodeContents(blockquote)
+  range.collapse(false)
+  const selection = window.getSelection()
+  selection.removeAllRanges()
+  selection.addRange(range)
+
+  onEditorInput()
+}
+
+// 处理回车键
+function handleEnterKey(e) {
+  const selection = window.getSelection()
+  if (!selection.rangeCount) return
+
+  const range = selection.getRangeAt(0)
+  const currentNode = range.startContainer
+  let element = currentNode.nodeType === Node.TEXT_NODE
+    ? currentNode.parentElement
+    : currentNode
+
+  // 如果在标题内按回车，创建新段落
+  if (['H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(element.tagName)) {
+    e.preventDefault()
+    const p = document.createElement('p')
+    p.innerHTML = '<br>'
+    element.parentNode.insertBefore(p, element.nextSibling)
+
+    // 将光标移动到新段落
+    const newRange = document.createRange()
+    newRange.setStart(p, 0)
+    newRange.collapse(true)
+    selection.removeAllRanges()
+    selection.addRange(newRange)
+
+    onEditorInput()
+  }
+}
+
+// 更新目录大纲
+function updateOutline() {
+  if (!editorRef.value) return
+
+  const headings = editorRef.value.querySelectorAll('h1, h2, h3, h4, h5, h6')
+  const newOutlineItems = Array.from(headings).map((heading, index) => {
+    // 复用已有ID或创建新ID
+    let id = heading.id
+    if (!id || !id.startsWith('heading-')) {
+      id = `heading-${index}`
+      heading.id = id
+    }
+
+    return {
+      id,
+      level: parseInt(heading.tagName.charAt(1)),
+      text: heading.textContent || '',
+      element: heading
+    }
+  })
+
+  // 只有目录发生变化时才更新
+  const hasChanged = JSON.stringify(outlineItems.value.map(i => ({ text: i.text, level: i.level }))) !==
+                     JSON.stringify(newOutlineItems.map(i => ({ text: i.text, level: i.level })))
+
+  if (hasChanged) {
+    outlineItems.value = newOutlineItems
+  }
+}
+
+// 启动目录定时更新
+function startOutlineTimer() {
+  if (outlineUpdateTimer.value) return
+  outlineUpdateTimer.value = setInterval(() => {
+    updateOutline()
+  }, 3000) // 每3秒更新一次
+}
+
+// 停止目录定时更新
+function stopOutlineTimer() {
+  if (outlineUpdateTimer.value) {
+    clearInterval(outlineUpdateTimer.value)
+    outlineUpdateTimer.value = null
+  }
+}
+
+// 滚动到指定标题
+function scrollToHeading(item) {
+  activeOutlineId.value = item.id
+  item.element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+// 切换全屏模式（编辑区域全屏）
+function toggleFullscreen() {
+  isFullscreen.value = !isFullscreen.value
+}
+
+// 监听编辑器滚动，更新当前激活的标题
+function handleEditorScroll() {
+  if (!editorRef.value || outlineItems.value.length === 0) return
+
+  const scrollTop = editorRef.value.scrollTop
+  const editorRect = editorRef.value.getBoundingClientRect()
+
+  for (let i = outlineItems.value.length - 1; i >= 0; i--) {
+    const item = outlineItems.value[i]
+    const rect = item.element.getBoundingClientRect()
+    const relativeTop = rect.top - editorRect.top
+
+    if (relativeTop <= 100) {
+      activeOutlineId.value = item.id
+      break
+    }
+  }
 }
 
 // ============ 选中文字工具栏 ============
 function handleMouseDown() {
   showAnnotationToolbar.value = false
+}
+
+function handleEditorClick(e) {
+  // 检查是否点击了评论标记
+  const commentMark = e.target.closest('.comment-mark')
+  if (commentMark) {
+    const commentId = commentMark.dataset.commentId
+    if (commentId) {
+      scrollToHighlight(commentId)
+    }
+  }
 }
 
 function handleTextSelection() {
@@ -1172,8 +1812,26 @@ function addLinkToSelection() {
 
 function translateSelection() {
   if (selectedText.value) {
-    ElMessage.info(`正在翻译: "${selectedText.value.substring(0, 30)}..."`)
-    // 这里可以集成翻译API
+    // 计算弹窗位置
+    const selection = window.getSelection()
+    if (selection.rangeCount > 0) {
+      const rect = selection.getRangeAt(0).getBoundingClientRect()
+      translationPosition.value = { top: rect.bottom + 10 + 'px', left: rect.left + 'px' }
+    }
+    // 模拟翻译结果
+    translatedText.value = `[译文] ${selectedText.value}`
+    showTranslationPopup.value = true
+  }
+  showAnnotationToolbar.value = false
+}
+
+function copySelection() {
+  if (selectedText.value) {
+    navigator.clipboard.writeText(selectedText.value).then(() => {
+      ElMessage.success('已复制到剪贴板')
+    }).catch(() => {
+      ElMessage.error('复制失败')
+    })
   }
   showAnnotationToolbar.value = false
 }
@@ -1181,6 +1839,131 @@ function translateSelection() {
 // ============ 评论功能 ============
 function toggleCommentsPanel() {
   showCommentsPanel.value = !showCommentsPanel.value
+}
+
+function toggleCommentExpand(commentId) {
+  const index = expandedCommentIds.value.indexOf(commentId)
+  if (index > -1) {
+    expandedCommentIds.value.splice(index, 1)
+  } else {
+    expandedCommentIds.value.push(commentId)
+  }
+  activeCommentId.value = commentId
+
+  // 自动定位到左侧正文对应位置
+  const comment = noteComments.value.find(c => c.id === commentId)
+  if (comment) {
+    scrollToHighlight(commentId)
+  }
+}
+
+function likeComment(comment) {
+  comment.likes = (comment.likes || 0) + 1
+}
+
+function handleCommentAction(command, comment) {
+  switch (command) {
+    case 'edit':
+      editingCommentId.value = comment.id
+      editingComment.value = { ...comment }
+      replyingTo.value = null
+      break
+    case 'delete':
+      ElMessageBox.confirm('确定要删除这条评论吗？', '删除评论', {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }).then(() => {
+        const index = noteComments.value.findIndex(c => c.id === comment.id)
+        if (index > -1) {
+          noteComments.value.splice(index, 1)
+          const allIndex = allComments.value.findIndex(c => c.id === comment.id)
+          if (allIndex > -1) {
+            allComments.value.splice(allIndex, 1)
+          }
+          ElMessage.success('评论已删除')
+        }
+      }).catch(() => {})
+      break
+  }
+}
+
+// 编辑回复（新方式）
+function editReply(comment, reply) {
+  editingReply.value = {
+    commentId: comment.id,
+    replyId: reply.id,
+    content: reply.content,
+    images: reply.images ? [...reply.images] : []
+  }
+}
+
+// 保存回复编辑
+function saveReplyEdit() {
+  if (!editingReply.value) return
+  const comment = noteComments.value.find(c => c.id === editingReply.value.commentId)
+  if (comment && comment.replies) {
+    const reply = comment.replies.find(r => r.id === editingReply.value.replyId)
+    if (reply) {
+      reply.content = editingReply.value.content
+      reply.images = editingReply.value.images?.length ? [...editingReply.value.images] : undefined
+      ElMessage.success('回复已更新')
+    }
+  }
+  editingReply.value = null
+}
+
+// 处理回复编辑时的图片拖拽
+function handleReplyEditImageDrop(e) {
+  e.preventDefault()
+  const files = e.dataTransfer.files
+  for (let i = 0; i < files.length; i++) {
+    if (files[i].type.indexOf('image') !== -1) {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        if (!editingReply.value.images) {
+          editingReply.value.images = []
+        }
+        editingReply.value.images.push(event.target.result)
+      }
+      reader.readAsDataURL(files[i])
+    }
+  }
+}
+
+// 处理回复编辑时的图片粘贴
+function handleReplyEditImagePaste(e) {
+  const items = e.clipboardData.items
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type.indexOf('image') !== -1) {
+      const file = items[i].getAsFile()
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        if (!editingReply.value.images) {
+          editingReply.value.images = []
+        }
+        editingReply.value.images.push(event.target.result)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+}
+
+// 移除回复编辑中的图片
+function removeReplyEditImage(index) {
+  if (editingReply.value && editingReply.value.images) {
+    editingReply.value.images.splice(index, 1)
+  }
+}
+
+const renderMarkdown = (content) => {
+  if (!content) return ''
+  try {
+    return marked.parse(content, { breaks: true, gfm: true })
+  } catch (e) {
+    console.error('Markdown渲染错误:', e)
+    return content
+  }
 }
 
 function addComment() {
@@ -1331,8 +2114,35 @@ function replyToComment(comment) {
   newCommentImages.value = []
 }
 
-function editComment(comment) {
-  ElMessage.info('编辑评论功能开发中')
+function startEditComment(comment) {
+  editingComment.value = { ...comment }
+}
+
+function cancelEditComment() {
+  editingComment.value = null
+}
+
+function saveEditComment() {
+  if (!editingComment.value.content.trim()) {
+    ElMessage.warning('评论内容不能为空')
+    return
+  }
+  
+  const comment = noteComments.value.find(c => c.id === editingComment.value.id)
+  if (comment) {
+    comment.content = editingComment.value.content
+    comment.updatedAt = new Date()
+    
+    // 同步更新 allComments
+    const allComment = allComments.value.find(c => c.id === editingComment.value.id)
+    if (allComment) {
+      allComment.content = editingComment.value.content
+      allComment.updatedAt = new Date()
+    }
+    
+    ElMessage.success('评论已更新')
+  }
+  editingComment.value = null
 }
 
 function deleteComment(comment) {
@@ -1353,8 +2163,69 @@ function deleteComment(comment) {
   }).catch(() => {})
 }
 
+// ============ 回复编辑功能 ============
+function startEditReply(comment, reply) {
+  editingReply.value = { ...reply, parentCommentId: comment.id }
+}
+
+function cancelEditReply() {
+  editingReply.value = null
+}
+
+function saveEditReply() {
+  if (!editingReply.value.content.trim()) {
+    ElMessage.warning('回复内容不能为空')
+    return
+  }
+  
+  const comment = noteComments.value.find(c => c.id === editingReply.value.parentCommentId)
+  if (comment && comment.replies) {
+    const reply = comment.replies.find(r => r.id === editingReply.value.id)
+    if (reply) {
+      reply.content = editingReply.value.content
+      reply.updatedAt = new Date()
+      ElMessage.success('回复已更新')
+    }
+  }
+  editingReply.value = null
+}
+
+function deleteReply(comment, reply) {
+  ElMessageBox.confirm('确定要删除这条回复吗？', '删除回复', {
+    confirmButtonText: '删除',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(() => {
+    if (comment.replies) {
+      const index = comment.replies.findIndex(r => r.id === reply.id)
+      if (index > -1) {
+        comment.replies.splice(index, 1)
+        ElMessage.success('回复已删除')
+      }
+    }
+  }).catch(() => {})
+}
+
 function scrollToHighlight(commentId) {
   activeCommentId.value = commentId
+
+  // 打开评论面板
+  showCommentsPanel.value = true
+
+  // 展开对应评论
+  if (!expandedCommentIds.value.includes(commentId)) {
+    expandedCommentIds.value.push(commentId)
+  }
+
+  // 滚动到评论位置
+  nextTick(() => {
+    const commentEl = document.querySelector(`[data-comment-id="${commentId}"]`)
+    if (commentEl) {
+      commentEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  })
+
+  // 高亮原文标记
   const mark = editorRef.value?.querySelector(`[data-comment-id="${commentId}"]`)
   if (mark) {
     mark.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -1366,12 +2237,121 @@ function scrollToHighlight(commentId) {
 }
 
 function viewImage(img) {
-  viewingImage.value = img
-  showImageViewer.value = true
+  // 创建全屏图片查看器
+  const viewer = document.createElement('div')
+  viewer.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    cursor: zoom-out;
+  `
+  const image = document.createElement('img')
+  image.src = img
+  image.style.cssText = `
+    max-width: 90%;
+    max-height: 90%;
+    object-fit: contain;
+  `
+  viewer.appendChild(image)
+  viewer.onclick = () => document.body.removeChild(viewer)
+  document.body.appendChild(viewer)
 }
 
 function closeImageViewer() {
   showImageViewer.value = false
+}
+
+// 显示图片右键菜单
+function showImageContextMenu(e, imgSrc) {
+  // 创建右键菜单
+  const menu = document.createElement('div')
+  menu.style.cssText = `
+    position: fixed;
+    top: ${e.clientY}px;
+    left: ${e.clientX}px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 4px 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 9999;
+  `
+  menu.innerHTML = `
+    <div style="padding: 8px 16px; cursor: pointer; hover: background: #f5f5f5;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='white'">
+      复制图片
+    </div>
+    <div style="padding: 8px 16px; cursor: pointer;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='white'">
+      在新窗口打开
+    </div>
+  `
+
+  // 复制图片功能
+  menu.children[0].onclick = () => {
+    copyImageToClipboard(imgSrc)
+    document.body.removeChild(menu)
+  }
+
+  // 新窗口打开
+  menu.children[1].onclick = () => {
+    window.open(imgSrc, '_blank')
+    document.body.removeChild(menu)
+  }
+
+  document.body.appendChild(menu)
+
+  // 点击其他地方关闭菜单
+  const closeMenu = (event) => {
+    if (!menu.contains(event.target)) {
+      if (menu.parentNode) {
+        document.body.removeChild(menu)
+      }
+      document.removeEventListener('click', closeMenu)
+    }
+  }
+  setTimeout(() => {
+    document.addEventListener('click', closeMenu)
+  }, 0)
+}
+
+// 复制图片到剪贴板
+async function copyImageToClipboard(imgSrc) {
+  try {
+    const response = await fetch(imgSrc)
+    const blob = await response.blob()
+    await navigator.clipboard.write([
+      new ClipboardItem({ [blob.type]: blob })
+    ])
+    ElMessage.success('图片已复制到剪贴板')
+  } catch (err) {
+    // 降级方案：使用 canvas
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, 0, 0)
+      canvas.toBlob(async (blob) => {
+        try {
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+          ])
+          ElMessage.success('图片已复制到剪贴板')
+        } catch (e) {
+          ElMessage.error('复制失败，请手动保存图片')
+        }
+      })
+    }
+    img.src = imgSrc
+  }
 }
 
 function startResize(e) {
@@ -1400,6 +2380,114 @@ function exportNote() {
   ElMessage.success('笔记导出成功')
 }
 
+// ============ 标签管理 ============
+// 打开标签管理对话框
+function openTagManager() {
+  showTagManager.value = true
+  tagSearchQuery.value = ''
+  selectedTags.value = []
+  // 初始化已选中的标签为当前笔记的标签
+  if (selectedNote.value?.tags) {
+    selectedTags.value = [...selectedNote.value.tags]
+  }
+}
+
+// 关闭标签管理对话框
+function closeTagManager() {
+  showTagManager.value = false
+  tagSearchQuery.value = ''
+  selectedTags.value = []
+}
+
+// 保存标签更改
+function saveTagChanges() {
+  if (selectedNote.value) {
+    selectedNote.value.tags = [...selectedTags.value]
+    ElMessage.success('标签已更新')
+  }
+  closeTagManager()
+}
+
+// 切换标签选中状态（多选）
+function toggleTagSelection(tagId) {
+  const index = selectedTags.value.indexOf(tagId)
+  if (index > -1) {
+    selectedTags.value.splice(index, 1)
+  } else {
+    selectedTags.value.push(tagId)
+  }
+}
+
+// 过滤后的标签列表
+const filteredTags = computed(() => {
+  if (!tagSearchQuery.value) return tags.value
+  const query = tagSearchQuery.value.toLowerCase()
+  return tags.value.filter(tag =>
+    tag.name.toLowerCase().includes(query)
+  )
+})
+
+// 当前笔记已添加的标签
+const currentNoteTags = computed(() => {
+  if (!selectedNote.value?.tags) return []
+  return tags.value.filter(tag => selectedNote.value.tags.includes(tag.id))
+})
+
+// 创建新标签
+function createNewTag() {
+  const name = tagSearchQuery.value.trim()
+  if (!name) {
+    ElMessage.warning('请输入标签名称')
+    return
+  }
+  // 检查是否已存在
+  const exists = tags.value.find(t => t.name === name)
+  if (exists) {
+    ElMessage.warning('标签已存在')
+    return
+  }
+  // 创建新标签
+  const colors = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#909399', '#8B5CF6', '#EC4899']
+  const newTag = {
+    id: Date.now().toString(),
+    name,
+    color: colors[Math.floor(Math.random() * colors.length)],
+    usageCount: 0
+  }
+  tags.value.push(newTag)
+  // 自动选中新标签
+  selectedTags.value.push(newTag.id)
+  tagSearchQuery.value = ''
+  ElMessage.success('标签创建成功')
+}
+
+// 删除标签
+function deleteTag(tagId) {
+  ElMessageBox.confirm('确定要删除这个标签吗？', '删除标签', {
+    confirmButtonText: '删除',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(() => {
+    // 从所有笔记中移除该标签
+    notes.value.forEach(note => {
+      if (note.tags?.includes(tagId)) {
+        note.tags = note.tags.filter(id => id !== tagId)
+      }
+    })
+    // 从标签列表中移除
+    const index = tags.value.findIndex(t => t.id === tagId)
+    if (index > -1) {
+      tags.value.splice(index, 1)
+    }
+    // 从选中列表中移除
+    const selectedIndex = selectedTags.value.indexOf(tagId)
+    if (selectedIndex > -1) {
+      selectedTags.value.splice(selectedIndex, 1)
+    }
+    ElMessage.success('标签已删除')
+  }).catch(() => {})
+}
+
 function handleMoreAction(command) {
   switch (command) {
     case 'delete':
@@ -1420,7 +2508,7 @@ function handleMoreAction(command) {
       ElMessage.info('移动功能开发中')
       break
     case 'tags':
-      ElMessage.info('标签管理功能开发中')
+      openTagManager()
       break
     case 'history':
       ElMessage.info('历史版本功能开发中')
@@ -1429,7 +2517,13 @@ function handleMoreAction(command) {
 }
 
 onMounted(() => {
-  // 初始化
+  // 启动目录定时更新
+  startOutlineTimer()
+})
+
+onUnmounted(() => {
+  // 停止目录定时更新
+  stopOutlineTimer()
 })
 </script>
 
@@ -1603,6 +2697,11 @@ onMounted(() => {
       .tag-item {
         cursor: pointer;
         transition: all 0.2s;
+        color: #000000 !important;
+
+        :deep(.el-tag__content) {
+          color: #000000 !important;
+        }
 
         &:hover {
           transform: scale(1.05);
@@ -1648,9 +2747,50 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   transition: width 0.3s ease;
+  position: relative;
 
   &.expanded {
     flex: 1;
+  }
+
+  &.collapsed {
+    width: 32px;
+    min-width: 32px;
+    background: #fafafa;
+  }
+
+  .collapse-list-btn {
+    position: absolute;
+    right: -12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 48px;
+    background: white;
+    border: 1px solid $border-light;
+    border-radius: 0 4px 4px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 10;
+    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: $primary;
+      color: white;
+      border-color: $primary;
+    }
+
+    &.collapsed {
+      right: -24px;
+      border-radius: 0 4px 4px 0;
+    }
+
+    .el-icon {
+      font-size: 0.75rem;
+    }
   }
 
   .list-header {
@@ -1757,6 +2897,11 @@ onMounted(() => {
 
           .note-tag {
             font-size: 0.6875rem;
+            color: #000000 !important;
+
+            :deep(.el-tag__content) {
+              color: #000000 !important;
+            }
           }
         }
 
@@ -1808,6 +2953,22 @@ onMounted(() => {
   flex-direction: column;
   background: white;
 
+  // 全屏模式样式
+  &.is-fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    width: 100vw;
+    height: 100vh;
+
+    .editor-content-wrapper {
+      height: calc(100vh - 120px); // 减去header和toolbar的高度
+    }
+  }
+
   .editor-header {
     display: flex;
     align-items: center;
@@ -1852,30 +3013,44 @@ onMounted(() => {
   .editor-toolbar {
     display: flex;
     align-items: center;
-    padding: $spacing-sm $spacing-md;
+    padding: 8px 16px;
     border-bottom: 1px solid $border-light;
-    gap: $spacing-xs;
+    gap: 4px;
     flex-wrap: wrap;
+    background: #fafafa;
 
     .toolbar-group {
       display: flex;
       gap: 2px;
       align-items: center;
+      padding: 0 4px;
+
+      &:not(:last-child) {
+        border-right: 1px solid $border-light;
+        padding-right: 8px;
+        margin-right: 4px;
+      }
     }
 
     .el-button {
-      padding: 4px 8px;
+      padding: 6px;
       font-size: 0.875rem;
       min-width: 32px;
       height: 32px;
+      border-radius: 4px;
+      transition: all 0.2s ease;
 
       &:hover {
-        background: $bg-secondary;
+        background: #e8e8e8;
       }
 
       &.is-active {
         background: rgba($primary, 0.1);
         color: $primary;
+      }
+
+      .el-icon {
+        font-size: 1rem;
       }
     }
 
@@ -1937,11 +3112,76 @@ onMounted(() => {
     display: flex;
     overflow: hidden;
 
+    // 目录大纲面板
+    .outline-panel {
+      width: 220px;
+      min-width: 220px;
+      background: white;
+      border-right: 1px solid $border-light;
+      display: flex;
+      flex-direction: column;
+
+      .outline-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: $spacing-md $spacing-lg;
+        border-bottom: 1px solid $border-light;
+
+        .outline-title {
+          font-size: 0.875rem;
+          font-weight: 600;
+          color: $text-primary;
+        }
+      }
+
+      .outline-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: $spacing-sm 0;
+
+        .outline-item {
+          padding: $spacing-xs $spacing-lg;
+          font-size: 0.8125rem;
+          color: $text-secondary;
+          cursor: pointer;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          transition: all 0.2s;
+          border-left: 2px solid transparent;
+
+          &:hover {
+            background: $bg-secondary;
+            color: $text-primary;
+          }
+
+          &.is-active {
+            background: rgba($primary, 0.08);
+            color: $primary;
+            border-left-color: $primary;
+          }
+
+          // 不同层级缩进
+          &.level-1 { padding-left: $spacing-lg; }
+          &.level-2 { padding-left: $spacing-lg + 12px; }
+          &.level-3 { padding-left: $spacing-lg + 24px; }
+          &.level-4 { padding-left: $spacing-lg + 36px; }
+          &.level-5 { padding-left: $spacing-lg + 48px; }
+          &.level-6 { padding-left: $spacing-lg + 60px; }
+        }
+      }
+    }
+
     .editor-content {
       flex: 1;
       overflow-y: auto;
       padding: $spacing-lg;
       background: white;
+
+      &.with-outline {
+        border-left: 1px solid $border-light;
+      }
 
       .rich-editor {
         min-height: 100%;
@@ -2079,7 +3319,7 @@ onMounted(() => {
     // 评论面板
     .comments-panel {
       border-left: 1px solid $border-light;
-      background: $bg-secondary;
+      background: #ffffff;
       display: flex;
       flex-direction: column;
       position: relative;
@@ -2118,69 +3358,176 @@ onMounted(() => {
         flex: 1;
         overflow-y: auto;
         padding: $spacing-md;
+        background: #ffffff;
 
         .comment-card {
-          background: white;
+          background: #ffffff;
           border-radius: $radius-md;
-          padding: $spacing-md;
           margin-bottom: $spacing-md;
           border: 1px solid $border-light;
           transition: all 0.2s;
+          overflow: hidden;
 
           &.is-active {
             border-color: $primary;
             box-shadow: 0 0 0 2px rgba($primary, 0.1);
           }
 
-          .comment-header {
+          .comment-card-header {
             display: flex;
-            align-items: flex-start;
-            gap: $spacing-sm;
-            padding: $spacing-sm;
+            align-items: center;
+            justify-content: space-between;
+            padding: $spacing-sm $spacing-md;
             background: #fffbeb;
-            border-radius: $radius-sm;
-            margin-bottom: $spacing-sm;
             cursor: pointer;
+            transition: background 0.2s;
 
-            .el-icon {
-              color: #f59e0b;
-              flex-shrink: 0;
+            &:hover {
+              background: #fef3c7;
             }
 
-            .quoted-text {
-              font-size: 0.8125rem;
-              color: $text-secondary;
-              overflow: hidden;
-              display: -webkit-box;
-              -webkit-line-clamp: 2;
-              -webkit-box-orient: vertical;
+            .selected-text-preview {
+              display: flex;
+              align-items: flex-start;
+              gap: $spacing-xs;
+              flex: 1;
+              min-width: 0;
+
+              .quote-icon {
+                font-size: 1.25rem;
+                color: #f59e0b;
+                line-height: 1;
+              }
+
+              .text-content {
+                font-size: 0.8125rem;
+                color: $text-secondary;
+                overflow: hidden;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                line-height: 1.5;
+              }
+            }
+
+            .expand-icon {
+              margin-left: $spacing-sm;
+              color: $text-tertiary;
+              flex-shrink: 0;
             }
           }
 
-          .comment-body {
-            .comment-author {
+          .comment-card-body {
+            padding: $spacing-md;
+
+            .comment-header {
               display: flex;
               align-items: center;
               gap: $spacing-sm;
               margin-bottom: $spacing-sm;
 
-              .author-name {
-                font-size: 0.8125rem;
-                font-weight: 500;
-                color: $text-primary;
-              }
+              .user-meta {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
 
-              .comment-time {
-                font-size: 0.75rem;
-                color: $text-tertiary;
+                .user-name {
+                  font-size: 0.875rem;
+                  font-weight: 500;
+                  color: $text-primary;
+                }
+
+                .comment-time {
+                  font-size: 0.75rem;
+                  color: $text-tertiary;
+                }
               }
             }
 
-            .comment-text {
+            .comment-content {
               font-size: 0.875rem;
               color: $text-primary;
               line-height: 1.6;
               margin-bottom: $spacing-sm;
+
+              :deep(p) {
+                margin: 0 0 $spacing-sm 0;
+
+                &:last-child {
+                  margin-bottom: 0;
+                }
+              }
+
+              :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
+                font-weight: 600;
+                margin: $spacing-md 0 $spacing-sm 0;
+                line-height: 1.4;
+              }
+
+              :deep(h1) { font-size: 1.25rem; }
+              :deep(h2) { font-size: 1.125rem; }
+              :deep(h3) { font-size: 1rem; }
+              :deep(h4), :deep(h5), :deep(h6) { font-size: 0.9375rem; }
+
+              :deep(ul), :deep(ol) {
+                margin: $spacing-sm 0;
+                padding-left: $spacing-lg;
+              }
+
+              :deep(li) {
+                margin-bottom: $spacing-xs;
+              }
+
+              :deep(strong) {
+                font-weight: 600;
+              }
+
+              :deep(em) {
+                font-style: italic;
+              }
+
+              :deep(blockquote) {
+                border-left: 3px solid $primary;
+                padding-left: $spacing-md;
+                margin: $spacing-sm 0;
+                color: $text-secondary;
+              }
+
+              :deep(code) {
+                background: $bg-tertiary;
+                padding: 2px 6px;
+                border-radius: $radius-sm;
+                font-family: 'Fira Code', monospace;
+                font-size: 0.8125rem;
+              }
+
+              :deep(pre) {
+                background: #f5f5f5;
+                padding: $spacing-md;
+                border-radius: $radius-md;
+                overflow-x: auto;
+                margin: $spacing-sm 0;
+
+                code {
+                  background: none;
+                  padding: 0;
+                }
+              }
+
+              :deep(a) {
+                color: $primary;
+                text-decoration: none;
+
+                &:hover {
+                  text-decoration: underline;
+                }
+              }
+
+              :deep(hr) {
+                border: none;
+                border-top: 1px solid $border-light;
+                margin: $spacing-md 0;
+              }
             }
 
             .comment-images {
@@ -2189,91 +3536,256 @@ onMounted(() => {
               gap: $spacing-sm;
               margin-bottom: $spacing-sm;
 
-              .comment-image {
+              .image-thumbnail {
                 width: 80px;
                 height: 80px;
-                object-fit: cover;
                 border-radius: $radius-sm;
+                overflow: hidden;
                 cursor: pointer;
                 transition: transform 0.2s;
 
                 &:hover {
                   transform: scale(1.05);
                 }
-              }
-            }
-          }
 
-          .comment-actions {
-            display: flex;
-            gap: $spacing-xs;
-            padding-top: $spacing-sm;
-            border-top: 1px solid $border-light;
-
-            .el-button {
-              font-size: 0.75rem;
-            }
-          }
-
-          .replies-list {
-            margin-top: $spacing-md;
-            padding-left: $spacing-lg;
-            border-left: 2px solid $border-light;
-
-            .reply-item {
-              padding: $spacing-sm 0;
-              border-bottom: 1px solid $border-light;
-
-              &:last-child {
-                border-bottom: none;
-              }
-
-              .reply-author {
-                display: flex;
-                align-items: center;
-                gap: $spacing-xs;
-                margin-bottom: $spacing-xs;
-
-                .author-name {
-                  font-size: 0.75rem;
-                  font-weight: 500;
-                }
-
-                .reply-time {
-                  font-size: 0.6875rem;
-                  color: $text-tertiary;
-                }
-              }
-
-              .reply-text {
-                font-size: 0.8125rem;
-                color: $text-secondary;
-                line-height: 1.5;
-              }
-
-              .reply-images {
-                display: flex;
-                flex-wrap: wrap;
-                gap: $spacing-xs;
-                margin-top: $spacing-xs;
-
-                .reply-image {
-                  width: 60px;
-                  height: 60px;
+                img {
+                  width: 100%;
+                  height: 100%;
                   object-fit: cover;
-                  border-radius: $radius-sm;
-                  cursor: pointer;
                 }
               }
+            }
 
-              .reply-actions {
+            // 评论编辑区域
+            .comment-edit-area {
+              margin-bottom: $spacing-sm;
+
+              .el-textarea {
+                margin-bottom: $spacing-sm;
+              }
+
+              .edit-actions {
                 display: flex;
-                gap: $spacing-xs;
-                margin-top: $spacing-xs;
+                justify-content: flex-end;
+                gap: $spacing-sm;
+              }
+            }
 
-                .el-button {
-                  font-size: 0.6875rem;
-                  padding: 2px 6px;
+            .comment-actions-bar {
+              display: flex;
+              gap: $spacing-xs;
+              padding-top: $spacing-sm;
+              border-top: 1px solid $border-light;
+
+              .el-button {
+                font-size: 0.8125rem;
+              }
+            }
+
+            .replies-list {
+              margin-top: $spacing-md;
+              padding-left: $spacing-lg;
+              border-left: 2px solid $border-light;
+
+              .reply-item {
+                padding: $spacing-sm 0;
+                border-bottom: 1px solid $border-light;
+
+                &:last-child {
+                  border-bottom: none;
+                }
+
+                .reply-header {
+                  display: flex;
+                  align-items: center;
+                  gap: $spacing-xs;
+                  margin-bottom: $spacing-xs;
+
+                  .reply-user {
+                    font-size: 0.8125rem;
+                    font-weight: 500;
+                  }
+
+                  .reply-time {
+                    font-size: 0.6875rem;
+                    color: $text-tertiary;
+                  }
+
+                  .reply-actions {
+                    margin-left: auto;
+                    display: flex;
+                    gap: 2px;
+
+                    .el-button {
+                      padding: 2px;
+                      font-size: 0.75rem;
+                    }
+                  }
+                }
+
+                .reply-content {
+                  font-size: 0.8125rem;
+                  color: $text-secondary;
+                  line-height: 1.5;
+
+                  :deep(p) {
+                    margin: 0 0 $spacing-xs 0;
+
+                    &:last-child {
+                      margin-bottom: 0;
+                    }
+                  }
+
+                  :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
+                    font-weight: 600;
+                    margin: $spacing-sm 0 $spacing-xs 0;
+                    line-height: 1.4;
+                  }
+
+                  :deep(h1) { font-size: 1rem; }
+                  :deep(h2) { font-size: 0.9375rem; }
+                  :deep(h3), :deep(h4), :deep(h5), :deep(h6) { font-size: 0.875rem; }
+
+                  :deep(ul), :deep(ol) {
+                    margin: $spacing-xs 0;
+                    padding-left: $spacing-md;
+                  }
+
+                  :deep(li) {
+                    margin-bottom: 2px;
+                  }
+
+                  :deep(strong) {
+                    font-weight: 600;
+                  }
+
+                  :deep(em) {
+                    font-style: italic;
+                  }
+
+                  :deep(code) {
+                    background: $bg-tertiary;
+                    padding: 1px 4px;
+                    border-radius: $radius-sm;
+                    font-family: 'Fira Code', monospace;
+                    font-size: 0.75rem;
+                  }
+
+                  :deep(pre) {
+                    background: #f5f5f5;
+                    padding: $spacing-sm;
+                    border-radius: $radius-sm;
+                    overflow-x: auto;
+                    margin: $spacing-xs 0;
+
+                    code {
+                      background: none;
+                      padding: 0;
+                    }
+                  }
+
+                  :deep(a) {
+                    color: $primary;
+                    text-decoration: none;
+
+                    &:hover {
+                      text-decoration: underline;
+                    }
+                  }
+                }
+
+                .reply-images {
+                  display: flex;
+                  flex-wrap: wrap;
+                  gap: $spacing-xs;
+                  margin-top: $spacing-xs;
+
+                  .image-thumbnail {
+                    width: 60px;
+                    height: 60px;
+                    border-radius: $radius-sm;
+                    overflow: hidden;
+                    cursor: pointer;
+
+                    img {
+                      width: 100%;
+                      height: 100%;
+                      object-fit: cover;
+                    }
+                  }
+                }
+
+                .reply-actions {
+                  display: flex;
+                  gap: $spacing-xs;
+                  margin-top: $spacing-xs;
+
+                  .el-button {
+                    font-size: 0.6875rem;
+                    padding: 2px 6px;
+                  }
+                }
+
+                // 回复编辑区域
+                .reply-edit-area {
+                  margin: $spacing-sm 0;
+
+                  .reply-edit-images {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: $spacing-sm;
+                    margin-bottom: $spacing-sm;
+
+                    .image-preview-item {
+                      position: relative;
+                      width: 60px;
+                      height: 60px;
+
+                      img {
+                        width: 100%;
+                        height: 100%;
+                        object-fit: cover;
+                        border-radius: $radius-sm;
+                      }
+
+                      .remove-image-btn {
+                        position: absolute;
+                        top: -4px;
+                        right: -4px;
+                        width: 16px;
+                        height: 16px;
+                        padding: 0;
+                        min-height: auto;
+                        background: $danger;
+                        color: white;
+                        border-radius: 50%;
+
+                        .el-icon {
+                          font-size: 0.625rem;
+                        }
+                      }
+                    }
+                  }
+
+                  .el-textarea {
+                    margin-bottom: $spacing-sm;
+                  }
+
+                  .reply-edit-actions {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+
+                    .image-hint {
+                      font-size: 0.75rem;
+                      color: $text-tertiary;
+                    }
+
+                    .action-btns {
+                      display: flex;
+                      gap: $spacing-sm;
+                    }
+                  }
                 }
               }
             }
@@ -2440,7 +3952,7 @@ onMounted(() => {
   background: white;
   border-radius: $radius-md;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  padding: 8px 12px;
+  padding: 6px 10px;
 
   .toolbar-content {
     display: flex;
@@ -2456,44 +3968,110 @@ onMounted(() => {
         align-items: center;
         justify-content: center;
         gap: 2px;
-        padding: 6px 8px;
+        padding: 6px;
         cursor: pointer;
-        border-radius: $radius-sm;
-        transition: all 0.2s ease;
+        border-radius: 4px;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 
         &:hover {
-          background: $bg-secondary;
-          transform: translateY(-2px);
+          background: #f0f0f0;
+          transform: scale(1.05);
         }
 
         &:active {
-          transform: translateY(0);
+          transform: scale(0.95);
         }
 
         &.icon-only {
-          padding: 8px;
-          min-width: 32px;
-          min-height: 32px;
+          padding: 6px;
+          min-width: 28px;
+          min-height: 28px;
           justify-content: center;
         }
 
+        // 格式按钮统一样式
+        &.format-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          padding: 0 !important;
+          margin: 0 4px;
+          border: none !important;
+          
+          &.active {
+            background: rgba($primary, 0.1);
+            color: $primary;
+          }
+          
+          &:hover {
+            background: #f0f0f0 !important;
+            transform: scale(1.05) !important;
+          }
+          
+          &:active {
+            transform: scale(0.95) !important;
+          }
+          
+          &:hover.active {
+            background: rgba($primary, 0.2);
+          }
+        }
+
+        // 覆盖el-button默认样式
+        .el-button.text {
+          padding: 0;
+          border: none;
+        }
+
+        .format-icon {
+          font-size: 0.875rem;
+          font-weight: 600;
+          color: $text-primary;
+          line-height: 1;
+          
+          &.italic {
+            font-style: italic;
+          }
+          
+          &.underline {
+            text-decoration: underline;
+          }
+          
+          &.strikethrough {
+            text-decoration: line-through;
+          }
+        }
+
+        .format-icon-svg {
+          font-size: 1rem;
+          color: $text-primary;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          
+          svg {
+            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          }
+        }
+
+        &:hover .format-icon-svg {
+          transform: scale(1.1);
+          
+          svg {
+            transform: scale(1.1);
+          }
+        }
+
         .color-preview {
-          width: 18px;
-          height: 18px;
+          width: 16px;
+          height: 16px;
           border-radius: 3px;
           transition: transform 0.2s ease;
         }
 
-        .underline-preview {
-          width: 18px;
-          height: 18px;
-          border-bottom: 3px solid;
-          transition: transform 0.2s ease;
-        }
-
         .font-color-preview {
-          width: 18px;
-          height: 18px;
+          width: 16px;
+          height: 16px;
           font-size: 0.875rem;
           font-weight: bold;
           display: flex;
@@ -2503,7 +4081,6 @@ onMounted(() => {
         }
 
         &:hover .color-preview,
-        &:hover .underline-preview,
         &:hover .font-color-preview {
           transform: scale(1.1);
         }
@@ -2562,9 +4139,9 @@ onMounted(() => {
 
     .toolbar-divider {
       width: 1px;
-      height: 24px;
+      height: 20px;
       background: $border-light;
-      margin: 0 8px;
+      margin: 0 5px;
     }
   }
 }
@@ -2681,5 +4258,183 @@ onMounted(() => {
     object-fit: contain;
     cursor: default;
   }
+}
+
+// 翻译弹窗
+.translation-popup {
+  position: fixed;
+  z-index: 1001;
+  background: white;
+  border-radius: $radius-lg;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  width: 320px;
+  max-width: 90vw;
+
+  .translation-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: $spacing-sm $spacing-md;
+    border-bottom: 1px solid $border-light;
+    font-weight: 500;
+  }
+
+  .translation-content {
+    padding: $spacing-md;
+
+    .original-text {
+      font-size: 0.875rem;
+      color: $text-secondary;
+      margin-bottom: $spacing-sm;
+      padding-bottom: $spacing-sm;
+      border-bottom: 1px solid $border-light;
+    }
+
+    .translated-text {
+      font-size: 0.9375rem;
+      color: $text-primary;
+      line-height: 1.6;
+    }
+  }
+}
+
+// 标签管理对话框样式
+.tag-manager-content {
+  .tag-search-box {
+    margin-bottom: $spacing-lg;
+
+    .tag-search-input {
+      :deep(.el-input__wrapper) {
+        background: $bg-secondary;
+      }
+
+      :deep(.el-input__inner) {
+        color: #000000 !important; // 搜索框文字颜色设为黑色
+
+        &::placeholder {
+          color: $text-tertiary;
+        }
+      }
+    }
+  }
+
+  .tag-list-section {
+    margin-bottom: $spacing-lg;
+
+    .tag-section-title {
+      font-size: 0.75rem;
+      color: $text-tertiary;
+      margin-bottom: $spacing-sm;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .tag-select-list {
+      max-height: 250px;
+      overflow-y: auto;
+
+      .tag-select-item {
+        display: flex;
+        align-items: center;
+        padding: $spacing-sm $spacing-md;
+        border-radius: $radius-md;
+        cursor: pointer;
+        transition: all 0.2s;
+        margin-bottom: $spacing-xs;
+
+        &:hover {
+          background: $bg-secondary;
+        }
+
+        &.is-selected {
+          background: rgba($primary, 0.1);
+          border: 1px solid rgba($primary, 0.3);
+        }
+
+        .tag-color-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          margin-right: $spacing-sm;
+          flex-shrink: 0;
+        }
+
+        .tag-name {
+          flex: 1;
+          font-size: 0.875rem;
+          color: #000000 !important; // 标签名称文字颜色设为黑色
+        }
+
+        .tag-count {
+          font-size: 0.75rem;
+          color: $text-tertiary;
+          margin-right: $spacing-sm;
+        }
+
+        .tag-check-icon {
+          color: $primary;
+          margin-right: $spacing-sm;
+        }
+
+        .tag-delete-btn {
+          opacity: 0;
+          transition: opacity 0.2s;
+          color: $text-tertiary;
+
+          &:hover {
+            color: $danger;
+          }
+        }
+
+        &:hover .tag-delete-btn {
+          opacity: 1;
+        }
+      }
+    }
+
+    .tag-empty-tip {
+      text-align: center;
+      padding: $spacing-lg;
+      color: $text-tertiary;
+      font-size: 0.8125rem;
+    }
+  }
+
+  .selected-tags-preview {
+    padding-top: $spacing-md;
+    border-top: 1px solid $border-light;
+
+    .tag-section-title {
+      font-size: 0.75rem;
+      color: $text-tertiary;
+      margin-bottom: $spacing-sm;
+    }
+
+    .selected-tags-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: $spacing-xs;
+
+      .el-tag {
+        color: white;
+        border: none;
+
+        .el-tag__close {
+          color: rgba(255, 255, 255, 0.8);
+
+          &:hover {
+            color: white;
+            background: rgba(255, 255, 255, 0.2);
+          }
+        }
+      }
+    }
+  }
+}
+
+.tag-manager-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: $spacing-sm;
 }
 </style>
