@@ -13,7 +13,7 @@
 
 ## 📖 项目简介
 
-EnofLaw是一款专为普通法学习者设计的综合性学习平台，融合MarginNote的案例标注与思维导图功能、Notion的知识库管理功能、Anki的间隔重复记忆系统，以及AI智能分析能力，为普通法学习者提供一站式学习解决方案。
+WeLaw是一款专为普通法学习者设计的综合性学习平台，融合MarginNote的案例标注与思维导图功能、Zetero的知识库管理功能、Anki的间隔重复记忆系统，飞书云文档的markdown文本编辑功能以及AI智能分析能力，为普通法学习者提供一站式学习解决方案。
 
 ## ✨ 核心功能
 
@@ -126,25 +126,6 @@ mysql -u root -p < database/seed_data.sql
 | 法学研究者 | 进行专题研究，需要系统整理文献 | 知识库构建、关联分析、论文写作辅助 |
 | 法律英语爱好者 | 希望提升法律英语能力 | 词汇学习、翻译工具、例句积累 |
 
-## 📅 开发路线图
-
-### 第一阶段 (MVP)
-- [x] 案例导入和基础阅读
-- [x] 简单标注功能
-- [x] 基础词汇库和划词翻译
-- [x] 简单闪卡学习
-
-### 第二阶段
-- [ ] 思维导图功能
-- [ ] 高级搜索
-- [ ] AI集成基础功能
-- [ ] 学习集功能
-
-### 第三阶段
-- [ ] 块级编辑器
-- [ ] 高级AI功能
-- [ ] 案例关联对比
-- [ ] 智能复习系统完善
 
 ## 🤝 贡献指南
 
@@ -172,7 +153,7 @@ mysql -u root -p < database/seed_data.sql
 
 ---
 
-# EnofLaw - Common Law Learning Platform
+# WeLaw - Common Law Learning Platform
 
 <p align="center">
   <img src="https://img.shields.io/badge/Vue-3.x-4FC08D?style=flat-square&logo=vue.js" alt="Vue3">
@@ -300,25 +281,6 @@ mysql -u root -p < database/seed_data.sql
 | Law Researchers | Thematic research, systematic literature organization | Knowledge base building, correlation analysis, thesis writing assistance |
 | Legal English Enthusiasts | Want to improve legal English proficiency | Vocabulary learning, translation tools, sentence accumulation |
 
-## 📅 Development Roadmap
-
-### Phase 1 (MVP)
-- [x] Case import and basic reading
-- [x] Simple annotation features
-- [x] Basic vocabulary library and instant translation
-- [x] Simple flashcard learning
-
-### Phase 2
-- [ ] Mind mapping features
-- [ ] Advanced search
-- [ ] Basic AI integration
-- [ ] Study sets functionality
-
-### Phase 3
-- [ ] Block-level editor
-- [ ] Advanced AI features
-- [ ] Case association comparison
-- [ ] Intelligent review system improvement
 
 ## 🤝 Contributing
 
