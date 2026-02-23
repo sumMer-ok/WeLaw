@@ -1,0 +1,68 @@
+// EnofLaw Design System
+// A sophisticated legal education platform with warm, scholarly aesthetics
+
+// Primary Colors - Warm legal tradition
+$primary: #8B4513;
+$primary-light: #A0522D;
+$primary-dark: #654321;
+$accent: #D4A574;
+$accent-light: #E8D4C4;
+
+// Background Colors - Parchment and leather tones
+$bg-primary: #FDF8F3;
+$bg-secondary: #F5EDE4;
+$bg-tertiary: #EDE4D8;
+$bg-dark: #2C2416;
+
+// Text Colors
+$text-primary: #1A1410;
+$text-secondary: #4A3F35;
+$text-tertiary: #7A6B5A;
+$text-light: #FDF8F3;
+
+// Semantic Colors
+$success: #5A7D5A;
+$warning: #B8860B;
+$danger: #8B0000;
+$info: #4A6741;
+
+// Border Colors
+$border-light: #E0D5C7;
+$border-medium: #C9B8A4;
+$border-dark: #A09080;
+
+// Typography
+$font-display: 'Crimson Text', Georgia, serif;
+$font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+// Spacing
+$spacing-xs: 4px;
+$spacing-sm: 8px;
+$spacing-md: 16px;
+$spacing-lg: 24px;
+$spacing-xl: 32px;
+$spacing-2xl: 48px;
+
+// Border Radius
+$radius-sm: 4px;
+$radius-md: 8px;
+$radius-lg: 12px;
+$radius-xl: 16px;
+
+// Shadows - Warm, soft shadows
+$shadow-sm: 0 1px 2px rgba(139, 69, 19, 0.05);
+$shadow-md: 0 4px 6px rgba(139, 69, 19, 0.07), 0 2px 4px rgba(139, 69, 19, 0.05);
+$shadow-lg: 0 10px 15px rgba(139, 69, 19, 0.08), 0 4px 6px rgba(139, 69, 19, 0.05);
+$shadow-xl: 0 20px 25px rgba(139, 69, 19, 0.1), 0 10px 10px rgba(139, 69, 19, 0.04);
+
+// Transitions
+$transition-fast: 150ms ease;
+$transition-normal: 250ms ease;
+$transition-slow: 350ms ease;
+
+// Z-index scale
+$z-dropdown: 100;
+$z-sticky: 200;
+$z-modal: 300;
+$z-popover: 400;
+$z-tooltip: 500;
